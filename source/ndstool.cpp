@@ -57,7 +57,7 @@ unsigned int arm7Entry = 0;
  */
 void Title()
 {
-	printf("Nintendo DS rom tool "PACKAGE_VERSION" - %s\nby Rafael Vuijk, Dave Murphy, Alexei Karpenko\n",CompileDate);
+	printf("Nintendo DS rom tool " PACKAGE_VERSION " - %s\nby Rafael Vuijk, Dave Murphy, Alexei Karpenko\n",CompileDate);
 }
 
 /*
@@ -181,7 +181,7 @@ int main(int argc, char *argv[])
 	#endif
 
 	if (argc < 2) { Help(); return 0; }
-	
+
 	int num_actions = 0;
 	int actions[MAX_ACTIONS];
 
@@ -230,7 +230,7 @@ int main(int argc, char *argv[])
 					OPTIONAL(ndsfilename);
 					break;
 				}
-				
+
 				case 'w':	// wildcard filemasks
 				{
 					while (1)
@@ -254,7 +254,7 @@ int main(int argc, char *argv[])
 				case 'd': REQUIRED(filerootdir); break;
 
 				// ARM7 filename
-				case '7': 
+				case '7':
 					if (argv[a][2] == 'i') {
 						REQUIRED(arm7ifilename);
 					} else {
@@ -350,7 +350,7 @@ int main(int argc, char *argv[])
 						default: Help(argv[a]); return 1;
 					}
 					break;
-				
+
 				case '?':	// global or specific help
 				{
 					Help(argv[a][2] ? argv[a]+2 : 0);	// 0=global help
@@ -459,7 +459,7 @@ int main(int argc, char *argv[])
 				filerootdir = 0;
 				/*status =*/ ExtractFiles(ndsfilename);
 				break;
-			
+
 			case ACTION_HOOK:
 			{
 				Hook(ndsfilename, arm7filename);
