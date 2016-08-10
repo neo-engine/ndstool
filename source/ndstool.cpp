@@ -292,7 +292,6 @@ int main(int argc, char *argv[])
                         if( *bst == '_' )
                             *bst = (char)233;
                     }
-                    printf( bannertext );
                     break;
                 }
 				case 'o':
