@@ -283,12 +283,18 @@ int main(int argc, char *argv[])
 					bannertype = BANNER_BINARY;
 					break;
 
-				case 'b':
+				case 'b': {
 					bannertype = BANNER_IMAGE;
 					REQUIRED(bannerfilename);
 					REQUIRED(bannertext);
-					break;
-
+                    char* bst = bannertext;
+                    while( *( bst++ ) ) {
+                        if( *bst == '_' )
+                            *bst = (char)233;
+                    }
+                    printf( bannertext );
+                    break;
+                }
 				case 'o':
 					REQUIRED(logofilename);
 					break;

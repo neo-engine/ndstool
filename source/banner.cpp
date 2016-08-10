@@ -68,16 +68,19 @@ void IconFromBMP()
 		banner.palette[i] = RGBQuadToRGB16(bmp.palette[i]);
 	}
 
-	// put title
+    // put title
 	for (int i=0; bannertext[i]; i++)
 	{
-		char c = bannertext[i];
+		short c = bannertext[i] % 256;
+        while( c < 0 ) c += 256;
 		if (c == ';') c = 0x0A;
 		for (int l=0; l<6; l++)
 		{
 			banner.title[l][i] = c;
 		}
+        printf( "%c", c );
 	}
+    printf( "\n" );
 
 	// calculate CRC
 	banner.crc = CalcBannerCRC(banner);
@@ -230,14 +233,17 @@ void IconFromGRF() {
 	// put title
 	for (int i=0; bannertext[i]; i++)
 	{
-		char c = bannertext[i];
+		short c = bannertext[i] % 256;
+        while( c < 0 ) c += 256;
 		if (c == ';') c = 0x0A;
-        if (c == '_') c = 130;
 		for (int l=0; l<6; l++)
 		{
 			banner.title[l][i] = c;
 		}
+        printf( "%c", c );
 	}
+    printf( "\n" );
+
 
 	// put Gfx Data
 	memcpy(banner.tile_data, &GfxData[1], 32*16);

@@ -131,7 +131,7 @@ void ShowHeaderInfo(Header &header, int romType, unsigned int length = 0x200)
 		}
 	}
 	printf("\n");
-	
+
 	printf("0x10\t%-25s\t", "Maker code"); for (unsigned int i=0; i<sizeof(header.makercode); i++)
 		if (header.makercode[i]) putchar(header.makercode[i]);
 	for (int j=0; j<NumMakers; j++)
@@ -212,7 +212,7 @@ void ShowHeaderInfo(Header &header, int romType, unsigned int length = 0x200)
 	}
 
 	int	offset=0x1c0;
-	
+
 	if (header.unitcode & 2) {
 		printf("0x1C0\t%-25s\t0x%X\n", "DSi9 ROM offset", (int)header.dsi9_rom_offset);
 		printf("0x1C4\t%-25s\t0x%X\n", "DSi9 entry address", (int)header.dsi9_entry_address);
@@ -221,7 +221,7 @@ void ShowHeaderInfo(Header &header, int romType, unsigned int length = 0x200)
 		printf("0x1D0\t%-25s\t0x%X\n", "DSi7 ROM offset", (int)header.dsi7_rom_offset);
 		printf("0x1D4\t%-25s\t0x%X\n", "DSi7 entry address", (int)header.dsi7_entry_address);
 		printf("0x1D8\t%-25s\t0x%X\n", "DSi7 RAM address", (int)header.dsi7_ram_address);
-		printf("0x1DC\t%-25s\t0x%X\n", "DSi7 code size", (int)header.dsi7_size);	
+		printf("0x1DC\t%-25s\t0x%X\n", "DSi7 code size", (int)header.dsi7_size);
 		offset=0x1E0;
 	}
 	for (unsigned int i=offset; i<length; i+=4)
@@ -425,7 +425,7 @@ void ShowVerboseInfo(FILE *fNDS, Header &header, int romType)
 
 		unsigned char sha_parts[3*SHA1_DIGEST_SIZE + 4];
 		fread(sha_parts + 3*SHA1_DIGEST_SIZE, 4, 1, fNDS);		// some number
-		
+
 		//printf("%08X\n", *(unsigned int *)(sha_parts + 3*SHA1_DIGEST_SIZE));
 
 		unsigned char header_sha1[SHA1_DIGEST_SIZE];
@@ -471,7 +471,7 @@ void ShowVerboseInfo(FILE *fNDS, Header &header, int romType)
 			//printf("big_sha1: "); big_sha1.print();
 			big_sha1.Get(sha1_from_sig, sizeof(sha1_from_sig));
 		}
-		
+
 		bool ok = (memcmp(sha_final, sha1_from_sig, SHA1_DIGEST_SIZE) == 0);
 		printf("DS Download Play(TM) / Wireless MultiBoot signature: %s\n", ok ? "OK" : "INVALID");
 		if (!ok)
@@ -483,7 +483,7 @@ void ShowVerboseInfo(FILE *fNDS, Header &header, int romType)
 			printf("signature hash: \t"); for (int i=0; i<SHA1_DIGEST_SIZE; i++) printf("%02X", sha1_from_sig[i]); printf("\n");
 		}
 	}
-	
+
 	// CRC32
 	{
 		unsigned char *buf = new unsigned char [0x10000];
@@ -500,7 +500,7 @@ void ShowVerboseInfo(FILE *fNDS, Header &header, int romType)
 		printf("\nFile CRC32:    \t%08X\n", (unsigned int)crc32);
 		RomListInfo(crc32);
 	}
-	
+
 	// ROM dumper 1.0 bad data
 	{
 		unsigned char buf[0x200];
@@ -542,7 +542,7 @@ void ShowInfo(char *ndsfilename)
 			unsigned short banner_crc = CalcBannerCRC(banner);
 			printf("\n");
 			printf("Banner CRC:                     \t0x%04X (%s)\n", (int)banner.crc, (banner_crc == banner.crc) ? "OK" : "INVALID");
-	
+
 			for (int language=1; language<=1; language++)
 			{
 				int line = 1;
@@ -550,7 +550,7 @@ void ShowInfo(char *ndsfilename)
 				for (int i=0; i<128; i++)
 				{
 					unsigned short c = banner.title[language][i];
-					if (c >= 128) c = '_';
+					if (c >= 128) printf( "(%d)", c ); //c = '_';
 					if (c == 0x00) { printf("\n"); break; }
 					if (c == 0x0A)
 					{
