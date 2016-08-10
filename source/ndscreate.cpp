@@ -317,7 +317,10 @@ void Create()
 	}
 
 	// override default title/game/maker codes
-	if (title) strncpy(header.title, title, 12);
+
+    printf( "title: %s\ngamecode: %s\nmakercode: %s\n", title, gamecode, makercode );
+
+    if (title) strncpy(header.title, title, 12);
 	if (gamecode) strncpy(header.gamecode, gamecode, 4);
 	if (makercode) strncpy((char *)header.makercode, makercode, 2);
 

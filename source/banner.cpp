@@ -78,7 +78,7 @@ void IconFromBMP()
 			banner.title[l][i] = c;
 		}
 	}
-	
+
 	// calculate CRC
 	banner.crc = CalcBannerCRC(banner);
 
@@ -87,7 +87,7 @@ void IconFromBMP()
 
 /*
  * IconFromGRF
- * 
+ *
  * Assumes Input File to be a 32x32 pixel 4bpp tiled image
  * grit command line:
  *      grit icon.png -g -gt -gB4 -gT <color> -m! -p -pe 16 -fh! -ftr
@@ -98,12 +98,12 @@ typedef struct {
 	unsigned char MapAttr;
 	unsigned char MMapAttr;
 	unsigned char PalAttr;
-	
+
 	unsigned char TileWidth;
 	unsigned char TileHeight;
 	unsigned char MetaTileWidth;
 	unsigned char MetaTileHeight;
-	
+
 	unsigned_int  GfxWidth;
 	unsigned_int  GfxHeight;
 } GRF_HEADER;
@@ -114,13 +114,13 @@ void IconFromGRF() {
 	unsigned char *GrfData;
 	unsigned char *GrfPtr;
 	unsigned   GrfSize;
-	
+
 	GRF_HEADER * GrfHeader;
 	unsigned char   *GfxData;
 	unsigned char   *PalData;
-	
+
 	Banner banner;
-	
+
 	// Open File and Read to Memory
 	GrfFile = fopen(bannerfilename, "rb");
 	if (!GrfFile)
@@ -128,11 +128,11 @@ void IconFromGRF() {
 		perror("Cannot open Banner File");
 		exit(1);
 	}
-	
+
 	fseek(GrfFile, 0, SEEK_END);
 	GrfSize = ftell(GrfFile);
 	fseek(GrfFile, 0, SEEK_SET);
-	
+
 	GrfData = (unsigned char *)malloc(GrfSize);
 	if (!GrfData)
 	{
@@ -140,7 +140,7 @@ void IconFromGRF() {
 		fprintf(stderr, "Cannot read Banner File: Out of Memory\n");
 		exit(1);
 	}
-	
+
 	fread(GrfData, 1, GrfSize, GrfFile);
 	if (ferror(GrfFile))
 	{
@@ -148,15 +148,15 @@ void IconFromGRF() {
 		fclose(GrfFile);
 		exit(1);
 	}
-	
+
 	fclose(GrfFile);
-	
+
 	// Parse RIFF File Structure : Check File Format
 	GrfHeader = NULL;
 	GfxData   = NULL;
 	PalData   = NULL;
-	
-	unsigned int datasize = GrfData[4] | (GrfData[5] << 8) | (GrfData[6] << 16) | (GrfData[7] << 24); 
+
+	unsigned int datasize = GrfData[4] | (GrfData[5] << 8) | (GrfData[6] << 16) | (GrfData[7] << 24);
 
 	if ( (memcmp(&GrfData[0], "RIFF", 4) != 0) ||
 		 (datasize != GrfSize-8) ||
@@ -165,9 +165,9 @@ void IconFromGRF() {
 		fprintf(stderr, "Banner File Error: File is no GRF File!\n");
 		goto error;
 	}
-	
+
 	GrfPtr = &GrfData[12];
-	
+
 	// Parse RIFF File Structure : Read Chunks
 	while ((unsigned)(GrfPtr - GrfData) < GrfSize)
 	{
@@ -186,13 +186,13 @@ void IconFromGRF() {
 		datasize = GrfPtr[4] | (GrfPtr[5] << 8) | (GrfPtr[6] << 16) | (GrfPtr[7] << 24);
 		GrfPtr += datasize+8;
 	}
-	
+
 	// Check Chunks
 	if (!GrfHeader || !GfxData || !PalData)
 	{
 		fprintf(stderr, "Banner File Error: GRF File is incomplete!\n");
 		goto error;
-	} 
+	}
 	// Check Header
 	// Note: Error checking is probably incomplete
 	if (GrfHeader->GfxWidth != 32 && GrfHeader->GfxHeight != 32)
@@ -207,54 +207,55 @@ void IconFromGRF() {
 	}
 	if (GrfHeader->TileWidth != 8 && GrfHeader->TileHeight != 8)
 	{
-		fprintf(stderr, 
+		fprintf(stderr,
 			"Banner File Error: Image must consist of 8x8 pixel tiles!\n");
 		goto error;
 	}
-	
+
 	// Check Compression
 	if (
 		((GfxData[0] & 0xF0) != 0x00) ||
 		((PalData[0] & 0xF0) != 0x00)
 		)
 	{
-		fprintf(stderr, 
+		fprintf(stderr,
 			"Banner File Error: Image must be uncompressed!\n");
 		goto error;
 	}
-	
+
 	// Finally build Banner (Same as IconFromBMP)
 	memset(&banner, 0, sizeof(banner));
 	banner.version = 1;
-	
+
 	// put title
 	for (int i=0; bannertext[i]; i++)
 	{
 		char c = bannertext[i];
 		if (c == ';') c = 0x0A;
+        if (c == '_') c = 130;
 		for (int l=0; l<6; l++)
 		{
 			banner.title[l][i] = c;
 		}
 	}
-	
+
 	// put Gfx Data
 	memcpy(banner.tile_data, &GfxData[1], 32*16);
-	
+
 	// put Pal Data
 	memcpy(banner.palette, &PalData[1], 16*2);
-	
+
 	// calculate CRC
 	banner.crc = CalcBannerCRC(banner);
-	
+
 	// write to file
 	fwrite(&banner, 1, sizeof(banner), fNDS);
-	
+
 	// free Memory
 	free(GrfData);
 	return;
-	
-	
+
+
 error:
 	free(GrfData);
 	exit(1);
