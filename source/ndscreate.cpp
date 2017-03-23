@@ -550,9 +550,9 @@ void Create()
 			if (bannertype == BANNER_IMAGE)
 			{
 				char * Ext = strrchr(bannerfilename, '.');
-				if (Ext && strcasecmp(Ext, ".bmp") == 0)
+				if (Ext && strcmp(Ext, ".bmp") == 0)
 					IconFromBMP();
-				else if (Ext && strcasecmp(Ext, ".grf") == 0)
+				else if (Ext && strcmp(Ext, ".grf") == 0)
 					IconFromGRF();
 				else
 				{
