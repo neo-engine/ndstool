@@ -1,4 +1,4 @@
-VERSION		:= "\"1.50.3m\""
+VERSION		:= "\"ph111p-git\""
 
 BUILD		:= build
 SOURCES		:= source
