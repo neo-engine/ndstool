@@ -11,6 +11,8 @@
 #include "sha1.h"
 #include "crc.h"
 
+#include <algorithm>
+
 unsigned int arm9_align = 0x1FF;
 unsigned int arm7_align = 0x1FF;
 unsigned int fnt_align = 0x1FF;		// 0x3 0x1FF
@@ -659,6 +661,10 @@ void Create()
 			// This is a DSi application!
 			header.unitcode = 2;
 
+			// Flag as DSi exclusive if higher TID is not the default
+			if (titleidHigh != 0x00030000)
+				header.unitcode |= 1;
+
 			// Flag as DSi exclusive if ARM9 is too big
 			if (header.arm9_size > 0x3BFE00)
 				header.unitcode |= 1;
@@ -691,7 +697,16 @@ void Create()
 	// Set flags in DSi extended header
 	if (header.unitcode & 2)
 	{
-		header.dsi_flags = 0x3;
+		newfilesize = std::max( ftell(fNDS) , static_cast<long>(header.banner_offset + 0x23c0));
+		newfilesize = (newfilesize + file_align) & ~file_align;
+		header.total_rom_size = newfilesize;
+
+		if (newfilesize != ftell(fNDS) ) {
+			fseek(fNDS, newfilesize-1, SEEK_SET);
+			fputc(0, fNDS);
+		}
+
+		header.dsi_flags = 0x01;
 		header.rom_control_info3 = 0x051E;
 		header.offset_0x88 = 0x0004D0B8;
 		header.offset_0x8C = 0x00000544;
@@ -716,9 +731,9 @@ void Create()
 		header.mbk9_wramcnt_setting = (0x03<<24) | 0x00000F;
 
 		header.region_flags = 0xFFFFFFFF;
-		header.access_control = 0x00000138;
+		header.access_control = accessControl;
 		header.scfg_ext_mask = scfgExtMask;
-		header.appflags = 1;
+		header.appflags = appFlags;
 		header.banner_size = 2112;
 		header.offset_0x20C = 0x00010000;
 		header.offset_0x218 = 0x0004D084;
@@ -733,14 +748,6 @@ void Create()
 		Sha1Hmac(header.hmac_arm9i, fNDS, header.dsi9_rom_offset, header.dsi9_size);
 		Sha1Hmac(header.hmac_arm7i, fNDS, header.dsi7_rom_offset, header.dsi7_size);
 		memset(header.rsa_signature, 0xFF, 0x80);
-
-		newfilesize = (ftell(fNDS) + file_align) & ~file_align;
-		header.total_rom_size = newfilesize;
-
-		if (newfilesize != ftell(fNDS) ) {
-			fseek(fNDS, newfilesize-1, SEEK_SET);
-			fputc(0, fNDS);
-		}
 	}
 
 	// calculate device capacity
