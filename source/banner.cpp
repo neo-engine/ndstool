@@ -69,17 +69,33 @@ void IconFromBMP()
 	}
 
     // put title
-	for (int i=0; bannertext[i]; i++)
-	{
-		short c = bannertext[i] % 256;
-        while( c < 0 ) c += 256;
-		if (c == ';') c = 0x0A;
-		for (int l=0; l<6; l++)
-		{
-			banner.title[l][i] = c;
-		}
-        printf( "%c", c );
-	}
+    if( bannertext ) {
+        for (int i=0; bannertext[i]; i++)
+        {
+            short c = bannertext[i] % 256;
+            while( c < 0 ) c += 256;
+            if (c == ';') c = 0x0A;
+            for (int l=0; l<6; l++)
+            {
+                banner.title[l][i] = c;
+            }
+            printf( "%c", c );
+        }
+    } else {
+        for (int l=0; l<6; l++)
+        {
+            printf( "%s banner text\n", bannerLanguages[l] );
+            for (int i=0; bannertext_e[l][i]; i++)
+            {
+                short c = bannertext_e[l][i] % 256;
+                while( c < 0 ) c += 256;
+                if (c == ';') c = 0x0A;
+                banner.title[l][i] = c;
+                printf( "%c", c );
+            }
+            printf( "\n" );
+        }
+    }
     printf( "\n" );
 
 	// calculate CRC

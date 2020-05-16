@@ -551,7 +551,7 @@ void ShowInfo(char *ndsfilename)
 			printf("\n");
 			printf("Banner CRC:                     \t0x%04X (%s)\n", (int)banner.crc, (banner_crc == banner.crc) ? "OK" : "INVALID");
 
-			for (int language=1; language<=1; language++)
+			for (int language=0; language < 6; language++)
 			{
 				int line = 1;
 				bool nextline = true;

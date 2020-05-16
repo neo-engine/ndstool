@@ -4,7 +4,7 @@ BUILD		:= build
 SOURCES		:= source
 
 CFLAGS		:= -DPACKAGE_VERSION=$(VERSION)
-CXXFLAGS	:= $(CFLAGS)
+CXXFLAGS	:= $(CFLAGS) -g -ggdb
 LDFLAGS		:=
 
 LIBS		:=

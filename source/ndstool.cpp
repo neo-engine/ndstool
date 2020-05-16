@@ -31,6 +31,7 @@ char *arm7ovltablefilename = 0;
 char *arm9ovltablefilename = 0;
 char *bannerfilename = 0;
 char *bannertext = 0;
+char *bannertext_e[ 6 ] = { 0 };
 //bool compatibility = false;
 char *headerfilename_or_size = 0;
 //char *uniquefilename = 0;
@@ -303,6 +304,20 @@ int main(int argc, char *argv[])
                     }
                     break;
                 }
+				case 'B': {
+					bannertype = BANNER_IMAGE;
+					REQUIRED(bannerfilename);
+                    for (int i = 0; i < 6; ++i ) {
+                        REQUIRED(bannertext_e[i]);
+                        char* bst = bannertext_e[i];
+                        while( *( bst++ ) ) {
+                            if( *bst == '_' )
+                                *bst = (char)233;
+                        }
+                    }
+                    break;
+                }
+
 				case 'o':
 					REQUIRED(logofilename);
 					break;
