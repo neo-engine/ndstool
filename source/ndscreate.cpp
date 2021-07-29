@@ -534,6 +534,8 @@ void Create()
 		// calculate offsets required for FNT and FAT
 		_entry_start = 8*directory_count;		// names come after directory structs
 		header.fnt_offset = (ftell(fNDS) + fnt_align) &~ fnt_align;
+
+
 		header.fnt_size =
 			_entry_start +		// directory structs
 			total_name_size +	// total number of name characters for dirs and files
@@ -543,6 +545,9 @@ void Create()
 		file_count += overlay_files;		// didn't take overlay files into FNT size, but have to be calculated into FAT size
 		header.fat_offset = (header.fnt_offset + header.fnt_size + fat_align) &~ fat_align;
 		header.fat_size = file_count * 8;		// each entry contains top & bottom offset
+
+        fprintf( stderr, "fnt_offset 0x%lx; fat_offset 0x%lx\n", header.fnt_offset,
+                header.fat_offset );
 
 		// banner after FNT/FAT
 		if (bannerfilename)
@@ -609,6 +614,7 @@ void Create()
 	}
 
 	// DSi sections
+    /*
 	if (header.rom_header_size > 0x200 && is_both_elf)
 	{
 		int sections = 2;
@@ -691,6 +697,7 @@ void Create()
 			ftruncate(fileno(fNDS), newfilesize);
 		}
 	}
+*/
 
 	header.rom_control_info1 = 0x00586000;
 	header.rom_control_info2 = 0x001808F8;
