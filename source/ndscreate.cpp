@@ -91,9 +91,9 @@ bool HasElfHeader(char *filename)
 
 	FILE *fi = fopen(filename, "rb");
 	if (!fi) return false;
-	int bytesread = fread(hdr,1,4,fi);
+	size_t bytesread = fread(hdr,1,4,fi);
 	fclose(fi);
-	if(bytesread<=0) return false;
+	if(bytesread==0) return false;
 	if(strncmp(hdr,"\x7f""ELF",4) == 0) return true;
 	return false;
 }
@@ -105,12 +105,12 @@ int CopyFromBin(char *binFilename, unsigned int *size = 0, unsigned int *size_wi
 {
 	FILE *fi = fopen(binFilename, "rb");
 	if (!fi) { fprintf(stderr, "Cannot open file '%s'.\n", binFilename); exit(1); }
-	unsigned int _size = 0;
+	size_t _size = 0;
+	unsigned char buffer[64*1024];
 	while (1)
 	{
-		unsigned char buffer[1024];
-		int bytesread = fread(buffer, 1, sizeof(buffer), fi);
-		if (bytesread <= 0) break;
+		size_t bytesread = fread(buffer, 1, sizeof(buffer), fi);
+		if (bytesread == 0) break;
 		fwrite(buffer, 1, bytesread, fNDS);
 		_size += bytesread;
 	}
@@ -446,12 +446,21 @@ void Create()
 
 		unsigned int size = 0;
 		if (is_arm9_elf)
-			CopyFromElf(arm9filename, &entry_address, &ram_address, &size, false);
+			CopyFromElf(arm9filename, &entry_address, &ram_address, &size, NULL, false);
 		else
 			CopyFromBin(arm9filename, 0, &size);
 		header.arm9_entry_address = entry_address;
 		header.arm9_ram_address = ram_address;
 		header.arm9_size = header.arm9_size + ((size + 3) &~ 3);
+
+		if (header.rom_header_size > 0x200 && (entry_address - ram_address) == 0x800 && header.arm9_size < 0x4000)
+		{
+			// Pad the arm9 binary to 16kb
+			unsigned int needed_padding = 0x4000 - header.arm9_size;
+			header.arm9_size = 0x4000;
+			fseek(fNDS, needed_padding-1, SEEK_CUR);
+			fputc(0, fNDS);
+		}
 	}
 
 	// ARM9 overlay table
@@ -488,7 +497,7 @@ void Create()
 		unsigned int size = 0;
 
 		if (is_arm7_elf)
-			CopyFromElf(arm7filename, &entry_address, &ram_address, &size, false);
+			CopyFromElf(arm7filename, &entry_address, &ram_address, &size, NULL, false);
 		else
 			CopyFromBin(arm7filename, &size);
 
@@ -553,7 +562,6 @@ void Create()
 		if (bannerfilename)
 		{
 			header.banner_offset = (header.fat_offset + header.fat_size + banner_align) &~ banner_align;
-			file_top = header.banner_offset + 0x840;
 			fseek(fNDS, header.banner_offset, SEEK_SET);
 			if (bannertype == BANNER_IMAGE)
 			{
@@ -571,13 +579,17 @@ void Create()
 			}
 			else
 			{
-				CopyFromBin(bannerfilename, 0);
+				CopyFromBin(bannerfilename, &bannersize);
 			}
+
+			file_top = header.banner_offset + bannersize;
+			header.banner_size = bannersize;
 		}
 		else
 		{
 			file_top = header.fat_offset + header.fat_size;
 			header.banner_offset = 0;
+			header.banner_size = 0;
 		}
 
 		file_end = file_top;	// no file data as yet
@@ -626,7 +638,7 @@ void Create()
 
 			unsigned int ram_address = 0;
 			unsigned int size = 0;
-			CopyFromElf(arm9filename, NULL, &ram_address, &size, true);
+			CopyFromElf(arm9filename, NULL, &ram_address, &size, NULL, true);
 			if (!size)
 			{
 				sections--;
@@ -649,7 +661,7 @@ void Create()
 
 			unsigned int ram_address = 0;
 			unsigned int size = 0;
-			CopyFromElf(arm7filename, NULL, &ram_address, &size, true);
+			CopyFromElf(arm7filename, NULL, &ram_address, &size, &mbkArm7WramMapAddress, true);
 			if (!size)
 			{
 				sections--;
@@ -716,9 +728,6 @@ void Create()
 
 		header.dsi_flags = 0x01;
 		header.rom_control_info3 = 0x051E;
-		header.offset_0x88 = 0x0004D0B8;
-		header.offset_0x8C = 0x00000544;
-		header.offset_0x90 = 0x00160016;
 
 		static const u8 global_mbk[5][4] =
 		{
@@ -733,7 +742,14 @@ void Create()
 		header.arm9_mbk_setting[0] = 0x00000000;
 		header.arm9_mbk_setting[1] = 0x07C03740;
 		header.arm9_mbk_setting[2] = 0x07403700;
-		header.arm7_mbk_setting[0] = 0x00403000;
+		if (mbkArm7WramMapAddress != 0) {
+			// Configure 256KB WRAM_A starting at the specified RAM address
+			unsigned int mbk_offset = (mbkArm7WramMapAddress - 0x03000000) / 0x10000;
+			header.arm7_mbk_setting[0] = (mbk_offset << 4) | (0x3 << 12) | ((mbk_offset + 4) << 20);
+		} else {
+			// Set correct MBK settings for WRAM_A (starts at 0x3000000 in card apps, 0x37C0000 otherwise)
+			header.arm7_mbk_setting[0] = (header.unitcode & 1) ? 0x080037C0 : 0x00403000;
+		}
 		header.arm7_mbk_setting[1] = 0x07C03740;
 		header.arm7_mbk_setting[2] = 0x07403700;
 		header.mbk9_wramcnt_setting = (0x03<<24) | 0x00000F;
@@ -742,10 +758,8 @@ void Create()
 		header.access_control = accessControl;
 		header.scfg_ext_mask = scfgExtMask;
 		header.appflags = appFlags;
-		header.banner_size = 2112;
+		header.device_list_ram_address = 0x02FFDC00;
 		header.offset_0x20C = 0x00010000;
-		header.offset_0x218 = 0x0004D084;
-		header.offset_0x21C = 0x0000052C;
 		header.tid_low  = header.gamecode[3] | (header.gamecode[2]<<8) | (header.gamecode[1]<<16) | (header.gamecode[0]<<24);
 		header.tid_high = titleidHigh;
 		memset(header.age_ratings, 0x80, sizeof(header.age_ratings));

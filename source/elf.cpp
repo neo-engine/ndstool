@@ -37,17 +37,6 @@
 
 extern FILE *fNDS;
 
-/* Function:    void ElfWriteZeros(size_t n, FILE *fp)
- * Description: Writes n zeroes to a file.
- * Parameters:  size_t n,  the number of zeroes to write.
- *              FILE  *fp, the file pointer to write to.
- */
-void ElfWriteZeros(size_t n, FILE *fp) {
-	while(n--)
-		if(fputc('\0', fp) == EOF)
-			die("!!failed to write to file \n");
-}
-
 /* Function:    void ElfWriteData(size_t n, FILE *fp)
  * Description: Writes data from one file to another.
  * Parameters:  size_t n,   the number of bytes to write.
@@ -55,16 +44,20 @@ void ElfWriteZeros(size_t n, FILE *fp) {
  *              FILE  *out, the file pointer to write to.
  */
 void ElfWriteData(size_t n, FILE *in, FILE *out) {
-	int c;
-  
-	while(n--) {
-		c = fgetc(in);
-    
-		if(c == EOF)
+	unsigned char buffer[64*1024];
+
+	while(n) {
+		size_t cur_size = n > sizeof(buffer) ? sizeof(buffer) : n;
+
+		size_t read = fread(buffer, 1, cur_size, in);
+		if (read != cur_size)
 			die("failed to read from input file\n");
-    
-		if(fputc(c, out) == EOF)
+
+		size_t written = fwrite(buffer, 1, cur_size, out);
+		if (written != cur_size)
 			die("failed to write to file\n");
+
+		n -= cur_size;
 	}
 }
 
@@ -124,17 +117,19 @@ void ElfReadHdr(FILE *fp, Elf32_Ehdr *hdr, Elf32_Phdr **phdr) {
  *              unsigned int *entry,       a pointer to place the entry point at.
  *              unsigned int *ram_address, a pointer to place the RAM address at.
  *              unsigned int *size,        a pointer to place the data size at.
+ *              unsigned int *wram_address,a pointer to map DSi exclusive ARM7 WRAM at.
  *              bool is_twl,               true if we want to copy TWL sections.
  */
 int CopyFromElf(char *elfFilename,         unsigned int *entry,
                 unsigned int *ram_address, unsigned int *size,
-                bool is_twl)
+                unsigned int *wram_address, bool is_twl)
 {
 	FILE        *in;
 	Elf32_Ehdr   header;
 	Elf32_Phdr  *p_headers;
 	unsigned int i;
-  
+	unsigned int expected_address = 0;
+
 	*ram_address = 0;
 
 	/* Open ELF file. */
@@ -155,28 +150,41 @@ int CopyFromElf(char *elfFilename,         unsigned int *entry,
 		/* Skip non-loadable segments. */
 		if(p_headers[i].p_type != PT_LOAD)
 			continue;
-    
-		/* Skip BSS segments. */
-		if(!p_headers[i].p_filesz)
+
+		/* Skip non-static sections. */
+		if(p_headers[i].p_flags&0x200000)
 			continue;
-    
+
 		/* Skip non-TWL/non-NTR sections. */
 		if(is_twl == !(p_headers[i].p_flags&0x100000))
 			continue;
-    
+
+		/* Detect address of DSi exclusive ARM7 WRAM bank. */
+		if(wram_address && !*wram_address && p_headers[i].p_vaddr >= 0x03000000 && p_headers[i].p_vaddr < 0x037F8000)
+			*wram_address = p_headers[i].p_vaddr;
+
+		/* Skip BSS segments. */
+		if(!p_headers[i].p_filesz)
+			continue;
+
 		/* Use first found address. */
 		if(!*ram_address)
 			*ram_address = p_headers[i].p_paddr;
-    
+		else if(p_headers[i].p_paddr != expected_address) {
+			char errormsg[512];
+			snprintf(errormsg,512,"PHDR %u paddr expected at 0x%08X, got 0x%08X", i, expected_address, p_headers[i].p_paddr);
+			die(errormsg);
+		}
+
 		/* Seek to segment offset. */
 		if(fseek(in, p_headers[i].p_offset, SEEK_SET))
 			die("failed to seek to program header segment\n");
-    
-    	/* Write file image and pad with zeros. */
-    	ElfWriteData(p_headers[i].p_filesz, in, fNDS);
-		ElfWriteZeros(p_headers[i].p_memsz - p_headers[i].p_filesz, fNDS);
-    
-		*size += p_headers[i].p_memsz;
+
+		/* Write file image. */
+		ElfWriteData(p_headers[i].p_filesz, in, fNDS);
+
+		*size += p_headers[i].p_filesz;
+		expected_address = p_headers[i].p_paddr + p_headers[i].p_filesz;
 	}
   
 	/* Clean up. */
