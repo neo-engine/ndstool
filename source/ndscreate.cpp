@@ -596,7 +596,7 @@ void Create()
 		// add (hidden) overlay files
 		for (unsigned int i=0; i<overlay_files; i++)
 		{
-			char s[32]; sprintf(s, OVERLAY_FMT, i/*free_file_id*/);
+			char s[32]; snprintf(s, 31, OVERLAY_FMT, i/*free_file_id*/);
 			AddFile(overlaydir, "/", s, i/*free_file_id*/);
 			//free_file_id++;		// incremented up to overlay_files
 		}
