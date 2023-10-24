@@ -28,7 +28,7 @@ void MkDir(char *name)
 void ExtractFile(const char *rootdir, const char *prefix, const char *entry_name, unsigned int file_id)
 {
 	unsigned int save_filepos = ftell(fNDS);
-	
+
 	// read FAT data
 	fseek(fNDS, header.fat_offset + 8*file_id, SEEK_SET);
 	unsigned_int top;
@@ -66,8 +66,8 @@ void ExtractFile(const char *rootdir, const char *prefix, const char *entry_name
 		}
 		fclose(fo);
 	}
-	
-	fseek(fNDS, save_filepos, SEEK_SET);	
+
+	fseek(fNDS, save_filepos, SEEK_SET);
 }
 
 /*
@@ -115,7 +115,7 @@ void ExtractDirectory(const char *prefix, unsigned int dir_id)
 	fseek(fNDS, header.fnt_offset + 8*(dir_id & 0xFFF), SEEK_SET);
 	unsigned_int entry_start;	// reference location of entry name
 	fread(&entry_start, 1, sizeof(entry_start), fNDS);
-	unsigned_short top_file_id;	// file ID of top entry 
+	unsigned_short top_file_id;	// file ID of top entry
 	fread(&top_file_id, 1, sizeof(top_file_id), fNDS);
 	unsigned_short parent_id;	// ID of parent directory or directory count (root)
 	fread(&parent_id, 1, sizeof(parent_id), fNDS);
@@ -136,7 +136,7 @@ void ExtractDirectory(const char *prefix, unsigned int dir_id)
 		unsigned int name_length = entry_type_name_length & 127;
 		bool entry_type_directory = (entry_type_name_length & 128) ? true : false;
 		if (name_length == 0) break;
-	
+
 		char entry_name[128];
 		memset(entry_name, 0, 128);
 		fread(entry_name, 1, entry_type_name_length & 127, fNDS);
@@ -172,7 +172,7 @@ void ExtractDirectory(const char *prefix, unsigned int dir_id)
 				//if (!directorycreated)
 				//{
 				//}
-				
+
 				//printf("%d\n", match);
 
 				if (match) ExtractFile(filerootdir, prefix, entry_name, file_id);
@@ -217,7 +217,7 @@ void ExtractFiles(char *ndsfilename)
 		{
 			fread(&overlayEntry, 1, sizeof(overlayEntry), fNDS);
 			int file_id = overlayEntry.id;
-			char s[32]; sprintf(s, OVERLAY_FMT, file_id);
+			char s[32]; snprintf(s, 31, OVERLAY_FMT, file_id);
 			ExtractFile(overlaydir, "/", s, file_id);
 		}
 	}
@@ -255,12 +255,12 @@ void Extract(char *outfilename, bool indirect_offset, unsigned int offset, bool 
 
 	if (indirect_offset) offset = *((unsigned_int *)&header + offset/4);
 	if (indirect_size) size = *((unsigned_int *)&header + size/4);
-	
+
 	fseek(fNDS, offset, SEEK_SET);
 
 	FILE *fo = fopen(outfilename, "wb");
 	if (!fo) { fprintf(stderr, "Cannot create file '%s'.\n", outfilename); exit(1); }
-	
+
 	unsigned char copybuf[1024];
 	while (size > 0)
 	{

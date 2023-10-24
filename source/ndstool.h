@@ -1,3 +1,5 @@
+#pragma once
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -6,6 +8,7 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include "little.h"
+#include "banner.h"
 #include "header.h"
 
 #define ROMTYPE_HOMEBREW	0
@@ -16,7 +19,7 @@
 
 #define MAX_FILEMASKS		16
 
-enum { BANNER_BINARY, BANNER_IMAGE };
+enum { BANNER_NONE, BANNER_BINARY, BANNER_IMAGE };
 
 extern unsigned int free_file_id;
 extern unsigned int file_end;
@@ -33,19 +36,19 @@ extern unsigned int file_top;
 extern int verbose;
 extern Header header;
 extern FILE *fNDS;
-extern char *romlistfilename;
 extern char *filemasks[MAX_FILEMASKS];
 extern int filemask_num;
 extern char *ndsfilename;
 extern char *arm7filename;
 extern char *arm9filename;
 extern char *filerootdir;
+extern char *fatimagepath;
 extern char *overlaydir;
 extern char *arm7ovltablefilename;
 extern char *arm9ovltablefilename;
 extern char *bannerfilename;
-extern char *bannertext;
-extern char *bannertext_e[ 6 ];
+extern char *banneranimfilename;
+extern const char *bannertext[MAX_BANNER_TITLE_COUNT];
 extern int bannertype;
 extern unsigned int bannersize;
 //extern bool compatibility;

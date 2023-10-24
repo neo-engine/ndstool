@@ -3,11 +3,31 @@
 #include "sha1.h"
 #include "crc.h"
 #include "bigint.h"
-#include "encryption.h"
+#include "utf16.h"
 
 /*
  * Data
  */
+const char *ageRatingNames[] =
+{
+	"Rating (Japan/CERO)",
+	"Rating (USA/ESRB)",
+	"Rating ?",
+	"Rating (Germany/USK)",
+	"Rating (Europe/PEGI)",
+	"Rating ?",
+	"Rating (Portugal/PEGI)",
+	"Rating (UK/PEGI/BBFC)",
+	"Rating (Australia/AGCB)",
+	"Rating (South Korea/GRB)",
+	"Rating ?",
+	"Rating ?",
+	"Rating ?",
+	"Rating ?",
+	"Rating ?",
+	"Rating ?"
+};
+
 unsigned char publicKeyNintendo[] =
 {
 	0x9E, 0xC1, 0xCC, 0xC0, 0x4A, 0x6B, 0xD0, 0xA0, 0x6D, 0x62, 0xED, 0x5F, 0x15, 0x67, 0x87, 0x12,
@@ -56,12 +76,11 @@ int DetectRomType()
 /*
  * CalcSecureAreaCRC
  */
-unsigned short CalcSecureAreaCRC(bool encrypt)
+unsigned short CalcSecureAreaCRC()
 {
 	fseek(fNDS, 0x4000, SEEK_SET);
 	unsigned char data[0x4000];
 	fread(data, 1, 0x4000, fNDS);
-	if (encrypt) encrypt_arm9(*(u32 *)header.gamecode, data);
 	return CalcCrc16(data, 0x4000);
 }
 
@@ -121,10 +140,13 @@ void FixHeaderCRC(char *ndsfilename)
  */
 void ShowHeaderInfo(Header &header, int romType, unsigned int length = 0x200)
 {
+	bool isTwl = header.unitcode & 0x02;
+
 	printf("0x00\t%-25s\t", "Game title");
 
 	for (unsigned int i=0; i<sizeof(header.title); i++)
-		if (header.title[i]) putchar(header.title[i]); printf("\n");
+		if (header.title[i]) putchar(header.title[i]);
+	printf("\n");
 
 	printf("0x0C\t%-25s\t", "Game code");
 	for (unsigned int i=0; i<sizeof(header.gamecode); i++)
@@ -158,7 +180,8 @@ void ShowHeaderInfo(Header &header, int romType, unsigned int length = 0x200)
 	printf("0x13\t%-25s\t0x%02X\n", "Device type", header.devicetype);
 	printf("0x14\t%-25s\t0x%02X (%d Mbit)\n", "Device capacity", header.devicecap, 1<<header.devicecap);
 	printf("0x15\t%-25s\t", "reserved 1"); for (unsigned int i=0; i<sizeof(header.reserved1); i++) printf("%02X", header.reserved1[i]); printf("\n");
-	printf("0x1E\t%-25s\t0x%02X\n", "ROM version", header.romversion);
+	if(isTwl) printf("0x1C\t%-25s\t0x%02X\n", "TWL flags", header.dsi_flags);
+	printf("0x1D\t%-25s\t0x%02X\n", isTwl ? "?" : "Region", header.nds_region);
 	printf("0x1F\t%-25s\t0x%02X\n", "reserved 2", header.reserved2);
 	printf("0x20\t%-25s\t0x%X\n", "ARM9 ROM offset", (int)header.arm9_rom_offset);
 	printf("0x24\t%-25s\t0x%X\n", "ARM9 entry address", (int)header.arm9_entry_address);
@@ -179,9 +202,9 @@ void ShowHeaderInfo(Header &header, int romType, unsigned int length = 0x200)
 	printf("0x60\t%-25s\t0x%08X\n", "ROM control info 1", (int)header.rom_control_info1);
 	printf("0x64\t%-25s\t0x%08X\n", "ROM control info 2", (int)header.rom_control_info2);
 	printf("0x68\t%-25s\t0x%X\n", "Icon/title offset", (int)header.banner_offset);
-	unsigned short secure_area_crc = CalcSecureAreaCRC((romType == ROMTYPE_NDSDUMPED));
+	unsigned short secure_area_crc = CalcSecureAreaCRC();
 	const char *s1, *s2 = "";
-	if (romType == ROMTYPE_HOMEBREW) s1 = "-";
+	if (romType == ROMTYPE_HOMEBREW || romType == ROMTYPE_NDSDUMPED) s1 = "-";
 	else if (secure_area_crc == header.secure_area_crc) s1 = "OK";
 	else
 	{
@@ -223,19 +246,43 @@ void ShowHeaderInfo(Header &header, int romType, unsigned int length = 0x200)
 
 	int	offset=0x1c0;
 
-	if (header.unitcode & 2) {
+	if (isTwl) {
 		printf("0x1C0\t%-25s\t0x%X\n", "DSi9 ROM offset", (int)header.dsi9_rom_offset);
 		printf("0x1C8\t%-25s\t0x%X\n", "DSi9 RAM address", (int)header.dsi9_ram_address);
 		printf("0x1CC\t%-25s\t0x%X\n", "DSi9 code size", (int)header.dsi9_size);
 		printf("0x1D0\t%-25s\t0x%X\n", "DSi7 ROM offset", (int)header.dsi7_rom_offset);
 		printf("0x1D8\t%-25s\t0x%X\n", "DSi7 RAM address", (int)header.dsi7_ram_address);
 		printf("0x1DC\t%-25s\t0x%X\n", "DSi7 code size", (int)header.dsi7_size);
-		offset=0x1E0;
+		for (unsigned int i=0x1e0; i<0x208; i+=4)
+		{
+			unsigned_int &x = ((unsigned_int *)&header)[i/4];
+			if (x != 0) printf("0x%02X\t%-25s\t0x%08X\n", i, "?", (int)x);
+		}
+		printf("0x208\t%-25s\t0x%X\n", "Banner size", (int)header.banner_size);
+		if (header.offset_0x20C != 0) printf("0x20C\t%-25s\t0x%X\n", "?", (int)header.offset_0x20C);
+		printf("0x210\t%-25s\t0x%X\n", "ROM size", (int)header.total_rom_size);
+		for (unsigned int i=0x214; i<0x230; i+=4)
+		{
+			unsigned_int &x = ((unsigned_int *)&header)[i/4];
+			if (x != 0) printf("0x%02X\t%-25s\t0x%08X\n", i, "?", (int)x);
+		}
+		printf("0x230\t%-25s\t0x%08X%08X\n", "DSi title ID", (int)header.tid_high, (int)header.tid_low);
+		offset=0x238;
+		length=0x2f0;
 	}
 	for (unsigned int i=offset; i<length; i+=4)
 	{
 		unsigned_int &x = ((unsigned_int *)&header)[i/4];
 		if (x != 0) printf("0x%02X\t%-25s\t0x%08X\n", i, "?", (int)x);
+	}
+	if (isTwl) {
+		for (unsigned int i=0; i<16; i++)
+		{
+			if (header.age_ratings[i] & 0x80)
+			{
+				printf("0x%X\t%-25s\t0x%2X\n", 0x2f0+i, ageRatingNames[i], header.age_ratings[i]);
+			}
+		}
 	}
 
 }
@@ -334,6 +381,8 @@ void Arm7Sha1(FILE *fNDS, unsigned char *arm7_sha1)
  */
 int CompareSha1WithList(unsigned char *arm7_sha1, const unsigned char *text, unsigned int textSize)
 {
+	(void)textSize;
+
 	while (1)
 	{
 		//printf("\n");
@@ -367,43 +416,6 @@ char *strsepc(char **s, char d)
 		if (*p == d) { *s = p+1; *p = 0; break; }
 	}
 	return r;
-}
-
-/*
- * RomListInfo
- */
-void RomListInfo(unsigned int crc32_match)
-{
-	if (!romlistfilename) return;
-	FILE *fRomList = fopen(romlistfilename, "rt");
-	if (!fRomList) { fprintf(stderr, "Cannot open file '%s'.\n", romlistfilename); exit(1); }
-	char s[1024];
-	while (fgets(s, 1024, fRomList))	// empty, title, title, title, title, filename, CRC32
-	{
-		char *p = s;
-		if (strlen(strsepc(&p, '\xAC')) == 0)
-		{
-			char *title = strsepc(&p, '\xAC');
-			unsigned int index = strtoul(title, 0, 10);
-			title += 7;
-			char *b1 = strchr(title, '(');
-			char *b2 = b1 ? strchr(b1+1, ')') : 0;
-			char *b3 = b2 ? strchr(b2+1, '(') : 0;
-			char *b4 = b3 ? strchr(b3+1, ')') : 0;
-			char *group = 0;
-			if (b1 + 2 == b2) if (b3 && b4) { *b3 = 0; *b4 = 0; group = b3+1; }		// remove release group name
-			strsepc(&p, '\xAC'); strsepc(&p, '\xAC');
-			strsepc(&p, '\xAC'); strsepc(&p, '\xAC');
-			unsigned long crc32 = strtoul(strsepc(&p, '\xAC'), 0, 16);
-			if (crc32 == crc32_match)
-			{
-				printf("Release index: \t%u\n", index);
-				printf("Release title: \t%s\n", title);
-				printf("Release group: \t%s\n", group ? group : "");
-			}
-			//for (int i=0; i<10; i++) printf("%d %s\n", i, strsepc(&p, '\xAC'));
-		}
-	}
 }
 
 /*
@@ -506,16 +518,6 @@ void ShowVerboseInfo(FILE *fNDS, Header &header, int romType)
 		delete [] buf;
 
 		printf("\nFile CRC32:    \t%08X\n", (unsigned int)crc32);
-		RomListInfo(crc32);
-	}
-
-	// ROM dumper 1.0 bad data
-	{
-		unsigned char buf[0x200];
-		fseek(fNDS, 0x7E00, SEEK_SET);
-		fread(buf, 1, 0x200, fNDS);
-		unsigned long crc32 = ~CalcCrc32(buf, 0x200);
-		printf("\nSMT dumper v1.0 corruption check: \t%s\n", (crc32 == 0x7E8B456F) ? "CORRUPTED" : "OK");
 	}
 
 	// check ARM7 entry address
@@ -526,6 +528,27 @@ void ShowVerboseInfo(FILE *fNDS, Header &header, int romType)
 	}
 }
 
+unsigned int FullyReadHeader(FILE *fNDS, Header &header) {
+	unsigned int headersize = 0x200;
+	fseek(fNDS, 0, SEEK_SET);
+	fread(&header, 1, headersize, fNDS);
+
+	if (header.unitcode & 2) { // DSi application
+		fseek(fNDS, 0, SEEK_SET);
+		fread((char*)&header, 1, sizeof(Header), fNDS);
+		headersize = sizeof(Header);
+	}
+
+	return headersize;
+}
+
+unsigned int GetBannerSizeFromHeader(Header &header, unsigned short banner_version) {
+	unsigned int max_size = CalcBannerSize(banner_version);
+	if ((header.unitcode & 2) && header.banner_size < max_size) // DSi application
+		max_size = header.banner_size;
+	return max_size;
+}
+
 /*
  * ShowInfo
  */
@@ -533,49 +556,77 @@ void ShowInfo(char *ndsfilename)
 {
 	fNDS = fopen(ndsfilename, "rb");
 	if (!fNDS) { fprintf(stderr, "Cannot open file '%s'.\n", ndsfilename); exit(1); }
-	fread(&header, 512, 1, fNDS);
+	FullyReadHeader(fNDS, header);
 
 	int romType = DetectRomType();
 
 	printf("Header information:\n");
 	ShowHeaderInfo(header, romType);
 
+	unsigned int bannersize = GetBannerSizeFromHeader(header, ExtractBannerVersion(fNDS, header.banner_offset));
+
 	// banner info
 	if (header.banner_offset)
 	{
 		Banner banner;
 		fseek(fNDS, header.banner_offset, SEEK_SET);
-		if (fread(&banner, 1, sizeof(banner), fNDS))
+		if (fread(&banner, 1, bannersize, fNDS))
 		{
-			unsigned short banner_crc = CalcBannerCRC(banner);
 			printf("\n");
-			printf("Banner CRC:                     \t0x%04X (%s)\n", (int)banner.crc, (banner_crc == banner.crc) ? "OK" : "INVALID");
+			for (int slot = 0; slot < NUM_VERSION_CRCS; slot++)
+			{
+				unsigned short min_version = GetBannerMinVersionForCRCSlot(slot);
+				unsigned short banner_crc = CalcBannerCRC(banner, slot, bannersize);
+				printf("Banner CRC %d:                   \t0x%04X", slot, (int)banner.crc[slot]);
+				if (min_version != BAD_MIN_VERSION_CRC && banner.version >= min_version)
+				{
+					printf(" (%s)", (banner_crc == banner.crc[slot]) ? "OK" : "INVALID");
+				}
+				printf("\n");
+			}
 
-			for (int language=0; language < 6; language++)
+			for (int language=0; language<GetBannerLanguageCount(banner.version); language++)
 			{
 				int line = 1;
-				bool nextline = true;
-				for (int i=0; i<128; i++)
+
+				unsigned_short line_utf16[BANNER_TITLE_LENGTH];
+				char line_system[BANNER_TITLE_LENGTH * 5];
+				char line_fallback[BANNER_TITLE_LENGTH];
+				int line_idx = 0;
+
+				line_utf16[0] = 0;
+				line_fallback[0] = 0;
+
+				for (int i=0; i<BANNER_TITLE_LENGTH; i++)
 				{
 					unsigned short c = banner.title[language][i];
-					if (c >= 128) printf( "(%d)", c ); //c = '_';
-					if (c == 0x00) { printf("\n"); break; }
-					if (c == 0x0A)
+
+					if (c == 0x0A || c == 0x00)
 					{
-						nextline = true;
+						// next line (0x0A) or end of text (0x00)
+						printf("%s banner text, line %d:", bannerLanguages[language], line);
+						for (unsigned int i=0; i<11 - strlen(bannerLanguages[language]); i++) putchar(' ');
+						bool convert_success = utf16_convert_to_system(
+							line_utf16, BANNER_TITLE_LENGTH * 2,
+							line_system, sizeof(line_system)
+						);
+						printf("\t%s\n", convert_success ? line_system : line_fallback);
+
+						if (c == 0x00) break;
+						line++;
+						line_idx = 0;
+
+						line_utf16[0] = 0;
+						line_fallback[0] = 0;
 					}
 					else
 					{
-						if (nextline)
-						{
-							if (line != 1) printf("\n");
-							printf("%s banner text, line %d:", bannerLanguages[language], line);
-							for (unsigned int i=0; i<11 - strlen(bannerLanguages[language]); i++) putchar(' ');
-							printf("\t");
-							nextline = false;
-							line++;
-						}
-						putchar(c);
+						// populate line data
+						line_utf16[line_idx] = c;
+						line_utf16[line_idx + 1] = 0;
+						line_fallback[line_idx] = (c >= 128) ? '_' : c;
+						line_fallback[line_idx + 1] = 0;
+						line_idx++;
 					}
 				}
 			}

@@ -81,7 +81,7 @@ bool HasElfExtension(char *filename)
 {
 	char *p = strrchr(filename, '.');
 	if (!p) return false;
-	return (strcmp(p, ".elf") == 0);
+	return (strcasecmp(p, ".elf") == 0);
 }
 
 
@@ -284,24 +284,15 @@ void AddDirectory(TreeNode *node, const char *prefix, unsigned int this_dir_id, 
  */
 void GetDefaultArm7(char* buffer, size_t size)
 {
-	char *devkitProPATH;
-	devkitProPATH = getenv("DEVKITPRO");
+	char *blocksds_path;
+	blocksds_path = getenv("BLOCKSDS");
 
-	#ifdef __WIN32__
-	// convert to standard windows path
-	if ( devkitProPATH && devkitProPATH[0] == '/' ) {
-		devkitProPATH[0] = devkitProPATH[1];
-		devkitProPATH[1] = ':';
-	}
-	#endif
-
-	if (!devkitProPATH) {
-		fprintf(stderr,"No arm7 specified and DEVKITPRO missing from environment!\n");
+	if (!blocksds_path) {
+		fprintf(stderr,"No arm7 specified and BLOCKSDS missing from environment!\n");
 		exit(1);
 	}
 
-	strncpy(buffer, devkitProPATH, size);
-	strncat(buffer, "/libnds/default.elf", size);
+	snprintf(buffer, size, "%s/sys/default_arm7/arm7.elf", blocksds_path);
 }
 
 /*
@@ -373,13 +364,11 @@ void Create()
 	// load a logo
 	if (logofilename)
 	{
-		char *p = strrchr(logofilename, '.');
-		if (!strcmp(p, ".bmp"))
+		if (IsRasterImageExtensionFilename(logofilename))
 		{
-			CRaster raster;
-			if (raster.LoadBMP(logofilename) < 0) exit(1);
-			unsigned char white = (raster.palette[0].rgbGreen >= 128) ? 0 : 1;
-			if (LogoConvert(raster.raster, header.logo, white) < 0) exit(1);
+			RasterImage raster;
+			if (!raster.load(logofilename)) exit(1);
+			if (!LogoConvert(raster, header.logo)) exit(1);
 		}
 		else
 		{
@@ -401,13 +390,10 @@ void Create()
 		memcpy(&header.offset_0xAC, "PASS01\x96", 7);		// automatically start with FlashMe, make it look more like a GBA rom
 	}
 
-	// override default title/game/maker codes
-
-    printf( "title: %s\ngamecode: %s\nmakercode: %s\n", title, gamecode, makercode );
-
-    if (title) strncpy(header.title, title, 12);
-	if (gamecode) strncpy(header.gamecode, gamecode, 4);
-	if (makercode) strncpy((char *)header.makercode, makercode, 2);
+	// override default title/game/maker codes. They don't need to be NUL-terminated.
+	if (title) strncpy(header.title, title, sizeof(header.title));
+	if (gamecode) strncpy(header.gamecode, gamecode, sizeof(header.gamecode));
+	if (makercode) strncpy((char *)header.makercode, makercode, sizeof(header.makercode));
 	header.romversion = (romversion & 0xff);
 
 	// --------------------------
@@ -559,37 +545,50 @@ void Create()
                 header.fat_offset );
 
 		// banner after FNT/FAT
-		if (bannerfilename)
 		{
 			header.banner_offset = (header.fat_offset + header.fat_size + banner_align) &~ banner_align;
 			fseek(fNDS, header.banner_offset, SEEK_SET);
 			if (bannertype == BANNER_IMAGE)
 			{
-				char * Ext = strrchr(bannerfilename, '.');
-				if (Ext && strcmp(Ext, ".bmp") == 0)
-					IconFromBMP();
-				else if (Ext && strcmp(Ext, ".grf") == 0)
+				char * Ext = bannerfilename == NULL ? NULL : strrchr(bannerfilename, '.');
+				if (Ext && strcasecmp(Ext, ".grf") == 0)
+				{
 					IconFromGRF();
+				}
 				else
 				{
-					fprintf(stderr,
-						"Banner File Error: Unknown extension '%s'!\n", Ext);
-					exit(1);
+					if (!IsRasterImageExtensionFilename(bannerfilename))
+					{
+						if (bannerfilename != NULL)
+						{
+							fprintf(stderr, "Warning: Unrecognized banner icon image extension: \"%s\"\n", bannerfilename);
+							bannerfilename = NULL;
+						}
+					}
+					if (!IsRasterImageExtensionFilename(banneranimfilename))
+					{
+						if (banneranimfilename != NULL)
+						{
+							fprintf(stderr, "Warning: Unrecognized banner animated icon image extension: \"%s\"\n", banneranimfilename);
+							banneranimfilename = NULL;
+						}
+					}
+					IconFromBMP();
 				}
+			}
+			else if (bannertype == BANNER_BINARY && bannerfilename)
+			{
+				CopyFromBin(bannerfilename, &bannersize);
 			}
 			else
 			{
-				CopyFromBin(bannerfilename, &bannersize);
+				file_top = header.fat_offset + header.fat_size;
+				header.banner_offset = 0;
+				header.banner_size = 0;
 			}
 
 			file_top = header.banner_offset + bannersize;
 			header.banner_size = bannersize;
-		}
-		else
-		{
-			file_top = header.fat_offset + header.fat_size;
-			header.banner_offset = 0;
-			header.banner_size = 0;
 		}
 
 		file_end = file_top;	// no file data as yet
@@ -612,6 +611,17 @@ void Create()
 			printf("%u normal files.\n", file_count - overlay_files);
 			printf("%u overlay files.\n", overlay_files);
 		}
+	}
+
+	if (fatimagepath) {
+		// Align to a FAT block size so that all reads are always aligned.
+		uint32_t block_align = 512 - 1;
+		header.fat_offset = (ftell(fNDS) + block_align) &~ block_align;
+
+		fseek(fNDS, header.fat_offset, SEEK_SET);
+		unsigned int fatimagesize;
+		CopyFromBin(fatimagepath, &fatimagesize);
+		header.fat_size = fatimagesize;
 	}
 
 	// --------------------------
