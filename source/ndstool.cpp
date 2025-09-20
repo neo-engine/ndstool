@@ -1,48 +1,52 @@
+// SPDX-FileNotice: Modified from the original version by the BlocksDS project, starting from 2023.
 /*
 	Nintendo DS rom tool
 	by Rafael Vuijk (aka DarkFader)
 */
 
+#include <errno.h>
 #include <unistd.h>
+
 #include "ndstool.h"
 #include "sha1.h"
 #include "ndscreate.h"
 #include "ndsextract.h"
 #include "banner.h"
 
-/*
- * Variables
- */
 int verbose = 0;
 Header header;
 FILE *fNDS = 0;
+
 char *filemasks[MAX_FILEMASKS];
 int filemask_num = 0;
+
 char *ndsfilename = 0;
 char *arm7filename = 0;
 char *arm9filename = 0;
 char *arm7ifilename = 0;
 char *arm9ifilename = 0;
-char *filerootdir = 0;
-char *fatimagepath = 0;
+
+int filerootdirs_num = 0;
+char *filerootdirs[MAX_FILEROOTDIRS];
+
 char *overlaydir = 0;
 char *arm7ovltablefilename = 0;
 char *arm9ovltablefilename = 0;
-char *bannerfilename = 0;
-char *banneranimfilename = 0;
+const char *bannerfilename = 0;
+const char *banneranimfilename = 0;
 const char *bannertext[MAX_BANNER_TITLE_COUNT] = {0};
 unsigned int bannersize = 0x840;
-//bool compatibility = false;
 char *headerfilename_or_size = 0;
-//char *uniquefilename = 0;
 char *logofilename = 0;
 char *title = 0;
 char *makercode = 0;
 char *gamecode = 0;
 char *vhdfilename = 0;
 char *sramfilename = 0;
-int latency1 = 0x1FFF;	//0x8F8;
-int latency2 = 0x3F;	//0x18;
+int latency_1 = 0;
+int latency_2 = 24;
+int latency1_1 = 2296;
+int latency1_2 = 24;
 unsigned int romversion = 0;
 
 int bannertype = 0;
@@ -50,33 +54,43 @@ unsigned int arm9RamAddress = 0;
 unsigned int arm7RamAddress = 0;
 unsigned int arm9Entry = 0;
 unsigned int arm7Entry = 0;
-unsigned int titleidHigh = 0x00030000; // DSi-enhanced gamecard. 0x00030004 (DSiWare) cannot be loaded as a card from DSi Menu
+int unitCode = -1;
+
+// By default declare DSi-compatible games as DSiware. There is no way to create
+// a DSi cartridge that works on regular unmodified consoles because they would
+// need to be signed. However, some people install DSi ROMs in DSi NAND, where
+// the DSiware ID makes more sense. Homebrew loaders generally ignore this
+// value, but some of them require the DSiware ID to provide the device list to
+// the application when it boots.
+//unsigned int titleidHigh = 0x00030000; // DSi-enhanced gamecard
+unsigned int titleidHigh = 0x00030004; // DSiware
+
 unsigned int scfgExtMask = 0x80040407; // enable access to everything
 unsigned int accessControl = 0x00000138;
 unsigned int mbkArm7WramMapAddress = 0;
 unsigned int appFlags = 0x01;
 
-
-/*
- * Title
- */
 void Title()
 {
-	printf("Nintendo DS rom tool " PACKAGE_VERSION " - %s\nby Rafael Vuijk, Dave Murphy, Alexei Karpenko\n",CompileDate);
+	printf("Nintendo DS rom tool (" VERSION_STRING ")\nby Rafael Vuijk, Dave Murphy, Alexei Karpenko\n");
 }
 
-/*
- * Help data
- */
-struct HelpLine
+void PrintVersion(void)
 {
-	const char *option_char;
-	const char *text;
+    printf("ndstool " VERSION_STRING "\n");
+}
+
+// Argument information
+struct ArgInfo
+{
+	const char *option_name;
+	int required_args;
+	const char *help_text;
 
 	void Print()
 	{
 		char s[1024];
-		strcpy(s, text);
+		strcpy(s, help_text);
 		printf("%-22s ", strtok(s, "\n"));
 		char *p = strtok(0, "\n"); if (p) printf("%-30s ", p);
 		for (int i=0; ; i++)
@@ -89,88 +103,85 @@ struct HelpLine
 	}
 };
 
-HelpLine helplines[] =
+ArgInfo arguments[] =
 {
-	{"",	"Parameter\nSyntax\nComments"},
-	{"",	"---------\n------\n--------"},
-	{"?",	"Show this help:\n-?[option]\nAll or single help for an option."},
-	{"i",	"Show information:\n-i [file.nds]\nHeader information."},
-	{"f",	"Fix header CRC\n-fh [file.nds]\nYou only need this after manual editing."},
-	{"f",	"Fix banner CRC\n-fb [file.nds]\nYou only need this after manual editing."},
-	{"l",	"List files:\n-l [file.nds]\nGive a list of contained files."},
-	{"v",	"  Show offsets/sizes\n-v"},
-	{"c",	"Create\n-c [file.nds]"},
-	{"x",	"Extract\n-x [file.nds]"},
-	{"v",	"  Show more info\n-v[v...]\nShow filenames and more header info.\nUse multiple v's for more information."},
-	{"9",	"  ARM9 executable\n-9 file.bin"},
-	{"7",	"  ARM7 executable\n-7 file.bin"},
-	{"y9",	"  ARM9 overlay table\n-y9 file.bin"},
-	{"y7",	"  ARM7 overlay table\n-y7 file.bin"},
-	{"d",	"  Data files\n-d directory"},
-	{"F",	"  FAT image\n-F image.bin"},
-	{"y",	"  Overlay files\n-y directory"},
-	{"b",	"  Banner icon/text\n-b file.[bmp|gif|png] \"text;text;text\"\nThe three lines are shown at different sizes."},
-	{"b",	"  Banner animated icon\n-ba file.[bmp|gif|png]"},
-	{"b",	"  Banner static icon\n-bi file.[bmp|gif|png]"},
-	{"b",	"  Banner text\n-bt0 \"region;specific;text\""},
-	{"t",	"  Banner binary\n-t file.bin"},
-	{"h",	"  Header template\n-h file.bin\nUse the header from another ROM as a template."},
-	{"h",	"  Header size\n-h size\nA header size of 0x4000 is default for real cards and newer homebrew, 0x200 for older homebrew."},
-	{"n",	"  Latency\n-n [L1] [L2]\ndefault=maximum"},
-	{"o",	"  Logo image/binary\n-o file.[bmp|gif|png]/file.bin"},
-	{"g",	"  Game info\n-g gamecode [makercode] [title] [rom ver]\nSets game-specific information.\nGame code is 4 characters. Maker code is 2 characters.\nTitle can be up to 12 characters."},
-	{"r",	"  ARM9 RAM address\n-r9 address"},
-	{"r",	"  ARM7 RAM address\n-r7 address"},
-	{"e",	"  ARM9 RAM entry\n-e9 address"},
-	{"e",	"  ARM7 RAM entry\n-e7 address"},
-	{"w",	"  Wildcard filemask(s)\n-w [filemask]...\n* and ? are wildcard characters."},
-	{"u",	"  DSi high title ID\n-u tidhigh  (32-bit hex)"},
-	{"z",   "  ARM7 SCFG EXT mask\n-z scfgmask (32-bit hex)"},
-	{"a",   "  DSi access flags\n-a accessflags (32-bit hex)"},
-	{"p",   "  DSi application flags\n-p appflags (8-bit hex)"},
-	{"q",   "  DSi ARM7 WRAM_A map address\n-m address (32-bit hex)"},
+	{"",	0, "Parameter\nSyntax\nComments"},
+	{"",	0, "---------\n------\n--------"},
+	{"?",   0, "Show this help:\n-?\nPrint help message."},
+	{"V",   0, "Show version\n-V\nPrints the version string and exits"},
+	{"i",   0, "Show information:\n-i [file.nds]\nHeader information."},
+	{"fh",  0, "Fix header CRC\n-fh [file.nds]\nYou only need this after manual editing."},
+	{"fb",  0, "Fix banner CRC\n-fb [file.nds]\nYou only need this after manual editing."},
+	{"l",   0, "List files:\n-l [file.nds]\nGive a list of contained files."},
+	{"c",   0, "Create\n-c [file.nds]"},
+	{"x",   0, "Extract\n-x [file.nds]"},
+	{"v",   0, "  Show more info\n-v\nShow filenames and more header info"},
+	{"vv",  0, "  Show more info\n-vv\nShow even more information than -v"},
+	{"9",   1, "  ARM9 executable\n-9 file.bin"},
+	{"9i",  1, "  ARM9i executable\n-9i file.bin"},
+	{"7",   1, "  ARM7 executable\n-7 file.bin"},
+	{"7i",  1, "  ARM7i executable\n-7i file.bin"},
+	{"y9",  1, "  ARM9 overlay table\n-y9 file.bin"},
+	{"y7",  1, "  ARM7 overlay table\n-y7 file.bin"},
+	{"d",   1, "  NitroFS root folder\n-d directory1 <directory2> ...\nAll directories are combined in the root of the filesystem"},
+	{"y",   1, "  Overlay files\n-y directory"},
+	{"b",   1, "  Banner icon/text\n-b file.[bmp|gif|png] \"text;text;text\"\nThe three lines are shown at different sizes."},
+	{"ba",  1, "  Banner animated icon\n-ba file.[bmp|gif|png]"},
+	{"bi",  1, "  Banner static icon\n-bi file.[bmp|gif|png]"},
+	{"bt",  2, "  Banner text\n-bt [langid] \"region;specific;text\""},
+	{"t",   1, "  Banner binary\n-t file.bin"},
+	{"h",   1, "  Header size/template\n-h size/file.bin\nIf a ROM file is provided, it uses that file as template for the header. If a size is provided, it sets the size of the header. A header size of 0x4000 is default for real cards and newer homebrew, 0x200 for older homebrew."},
+	{"n",   2, "  Latency\n-n [start gap] [per-block gap]\ndefault = 0 24"},
+	{"n1",  2, "  Latency 1\n-n1 [start gap] [per-block gap]\ndefault = 2296 24"},
+	{"o",   1, "  Logo image/binary\n-o file.[bmp|gif|png]/file.bin"},
+	{"m",   1, "  Maker code\n-m code\n The code must be 2 characters long"},
+	{"g",   1, "  Game info\n-g gamecode [makercode] [title] [rom ver]\nSets game-specific information.\nGame code is 4 characters. Maker code is 2 characters.\nTitle can be up to 12 characters."},
+	{"r9",  1, "  ARM9 RAM address\n-r9 address"},
+	{"r7",  1, "  ARM7 RAM address\n-r7 address"},
+	{"e9",  1, "  ARM9 RAM entry\n-e9 address"},
+	{"e7",  1, "  ARM7 RAM entry\n-e7 address"},
+	{"w",   0, "  Wildcard filemask(s)\n-w [filemask]...\n* and ? are wildcard characters."},
+	{"u",   1, "  DSi high title ID\n-u tidhigh  (32-bit hex)"},
+	{"uc",  1, "  DSi unit code\n-uc unitcode (0 = DS-only, 2 = DS or DSi, 3 = DSi-only)"},
+	{"z",   1, "  ARM7 SCFG EXT mask\n-z scfgmask (32-bit hex)"},
+	{"a",   1, "  DSi access flags\n-a accessflags (32-bit hex)"},
+	{"p",   1, "  DSi application flags\n-p appflags (8-bit hex)"},
+	{"q",   1, "  DSi ARM7 WRAM_A map address\n-m address (32-bit hex)"},
+	{NULL,  0, NULL} // Marker of end of list
 };
 
-/*
- * Help
- */
-void Help(char *specificoption = 0)
+ArgInfo *GetArgumentInformation(const char *str)
+{
+	ArgInfo *arg = &arguments[0];
+
+	while (arg->option_name != NULL)
+	{
+		if (strcmp(str, arg->option_name) == 0)
+			return arg;
+		arg++;
+	}
+
+	return NULL;
+}
+
+void Help(void)
 {
 	Title();
 	printf("\n");
 
-	if (specificoption)
+	ArgInfo *arg = &arguments[0];
+	while (arg->option_name != NULL)
 	{
-		bool found = false;
-		for (unsigned int i=0; i<(sizeof(helplines) / sizeof(helplines[0])); i++)
-		{
-			for (const char *o = helplines[i].option_char; *o; o++)
-			{
-				if (*o == *specificoption) { helplines[i].Print(); found = true; }
-			}
-		}
-		if (!found)
-		{
-			printf("Unknown option: %s\n\n", specificoption);
-		}
+		arg->Print();
+		arg++;
 	}
-	else
-	{
-		for (unsigned int i=0; i<(sizeof(helplines) / sizeof(helplines[0])); i++)
-		{
-			helplines[i].Print();
-		}
-		printf("\n");
-		printf("You only need to specify the NDS filename once if you want to perform multiple actions.\n");
-		printf("Actions are performed in the specified order.\n");
-		printf("Addresses can be prefixed with '0x' to use hexadecimal format.\n");
-	}
+
+	printf("\n");
+	printf("You only need to specify the NDS filename once if you want to perform multiple actions.\n");
+	printf("Actions are performed in the specified order.\n");
+	printf("Addresses can be prefixed with '0x' to use hexadecimal format.\n");
 }
 
-
-#define REQUIRED(var)	var = ((argc > a+1) ? argv[++a] : 0)								// must precede OPTIONAL
-#define OPTIONAL(var)	{ /*fprintf(stderr, "'%s'\n", argv[a]);*/ char *t = ((argc > a+1) && (argv[a+1][0] != '-') ? argv[++a] : 0); if (!var) var = t; else if (t) fprintf(stderr, "%s is already specified!\n", #var); }		// final paramter requirement checks are done when performing actions
-#define OPTIONAL_INT(var)	{ char *t = ((argc > a+1) && (argv[a+1][0] != '-') ? argv[++a] : 0); if (t) var = strtoul(t,0,0); }		// like OPTIONAL, but for (positive) integers
 #define MAX_ACTIONS		32
 #define ADDACTION(a)	{ if (num_actions < MAX_ACTIONS) actions[num_actions++] = a; }
 
@@ -183,244 +194,308 @@ enum {
 	ACTION_CREATE,
 };
 
-/*
- * main
- */
 int main(int argc, char *argv[])
 {
-	#ifdef _NDSTOOL_P_H
-		if (sizeof(Header) != 0x200) { fprintf(stderr, "Header size %d != %d\n", sizeof(Header), 0x200); return 1; }
-	#endif
-
-	if (argc < 2) { Help(); return 0; }
+	if (argc < 2)
+	{
+		Help();
+		return 0;
+	}
 
 	int num_actions = 0;
 	int actions[MAX_ACTIONS];
 
-	/*
-	 * parse parameters to actions
-	 */
-
-	for (int a=1; a<argc; a++)
+	int a = 1;
+	while (a < argc)
 	{
-		if (argv[a][0] == '-')
+		char *arg = argv[a++];
+
+		if (arg[0] == '-')
 		{
-			switch (argv[a][1])
+			ArgInfo *info = GetArgumentInformation(arg + 1); // Skip dash
+			if (info == NULL)
 			{
-				case 'i':	// show information
+				fprintf(stderr, "Unknown argument '%s'\n", arg);
+				return EXIT_FAILURE;
+			}
+
+			if (info->required_args > 0)
+			{
+				if (a + info->required_args > argc)
 				{
-					ADDACTION(ACTION_SHOWINFO);
-					OPTIONAL(ndsfilename);
-					break;
-				}
-
-				case 'f':	// fix header/banner CRC
-				{
-					switch (argv[a][2])
-					{
-						case 'h': ADDACTION(ACTION_FIXHEADERCRC); OPTIONAL(ndsfilename); break;
-						case 'b': ADDACTION(ACTION_FIXBANNERCRC); OPTIONAL(ndsfilename); break;
-						default: Help(argv[a]); return 1;
-					}
-					break;
-				}
-
-				case 'l':	// list files
-				{
-					ADDACTION(ACTION_LISTFILES);
-					OPTIONAL(ndsfilename);
-					break;
-				}
-
-				case 'x':	// extract
-				{
-					ADDACTION(ACTION_EXTRACT);
-					OPTIONAL(ndsfilename);
-					break;
-				}
-
-				case 'w':	// wildcard filemasks
-				{
-					while (1)
-					{
-						char *filemask = 0;
-						OPTIONAL(filemask);
-						if (!(filemasks[filemask_num] = filemask)) break;
-						if (++filemask_num >= MAX_FILEMASKS) return 1;
-					}
-					break;
-				}
-
-				case 'c':	// create
-				{
-					ADDACTION(ACTION_CREATE);
-					OPTIONAL(ndsfilename);
-					break;
-				}
-
-				// file root directory
-				case 'd': REQUIRED(filerootdir); break;
-
-				// FAT image
-				case 'F': REQUIRED(fatimagepath); break;
-
-				// ARM7 filename
-				case '7':
-					if (argv[a][2] == 'i') {
-						REQUIRED(arm7ifilename);
-					} else {
-						REQUIRED(arm7filename);
-					}
-					break;
-				// ARM9 filename
-				case '9':
-					if (argv[a][2] == 'i') {
-						REQUIRED(arm9ifilename);
-					} else {
-						REQUIRED(arm9filename);
-					}
-					break;
-
-				case 't':
-					REQUIRED(bannerfilename);
-					bannertype = BANNER_BINARY;
-					break;
-
-				case 'b':
-				{
-					bannertype = BANNER_IMAGE;
-					if (argv[a][2] == 't') {
-						int text_idx = 1;
-						if (argv[a][3] >= '0' && argv[a][3] <= '9') {
-							text_idx = atoi(argv[a] + 3);
-						}
-						if (text_idx <= MAX_BANNER_TITLE_COUNT) {
-							REQUIRED(bannertext[text_idx]);
-						} else {
-							char* skip;
-							REQUIRED(skip);
-							(void) skip;
-						}
-					} else if (argv[a][2] == 'i') {
-						REQUIRED(bannerfilename);
-					} else if (argv[a][2] == 'a') {
-						REQUIRED(banneranimfilename);
-					} else {
-						REQUIRED(bannerfilename);
-						banneranimfilename = bannerfilename;
-						OPTIONAL(bannertext[1]);
-					}
-				} break;
-
-				case 'o':
-					REQUIRED(logofilename);
-					break;
-
-				case 'h':	// load header or header size
-					REQUIRED(headerfilename_or_size);
-					break;
-
-				/*case 'u':	// unique ID file
-					REQUIRED(uniquefilename);
-					break;*/
-
-				case 'u': // DSi title ID high word
-					if (argc > a)
-						titleidHigh = strtoul(argv[++a], 0, 16);
-					break;
-
-				case 'z': // SCFG access flags
-					if (argc > a)
-						scfgExtMask = strtoul(argv[++a], 0, 16);
-					break;
-
-				case 'a': // DSi access control flags
-					if (argc > a)
-						accessControl = strtoul(argv[++a], 0, 16);
-					break;
-
-				case 'p': // DSi application flags
-					if (argc > a)
-						appFlags = strtoul(argv[++a], 0, 16) & 0xFF;
-					break;
-
-				case 'q': // DSi ARM7 WRAM_A map address
-					if (argc > a)
-						mbkArm7WramMapAddress = strtoul(argv[++a], 0, 16);
-					break;
-
-				case 'v':	// verbose
-					for (char *p=argv[a]; *p; p++) if (*p == 'v') verbose++;
-					break;
-
-				case 'n':	// latency
-					//compatibility = true;
-					OPTIONAL_INT(latency1);
-					OPTIONAL_INT(latency2);
-					break;
-
-				case 'r':	// RAM address
-					switch (argv[a][2])
-					{
-						case '7': arm7RamAddress = (argc > a) ? strtoul(argv[++a], 0, 0) : 0; break;
-						case '9': arm9RamAddress = (argc > a) ? strtoul(argv[++a], 0, 0) : 0; break;
-						default: Help(argv[a]); return 1;
-					}
-					break;
-
-				case 'e':	// entry point
-					switch (argv[a][2])
-					{
-						case '7': arm7Entry = (argc > a) ? strtoul(argv[++a], 0, 0) : 0; break;
-						case '9': arm9Entry = (argc > a) ? strtoul(argv[++a], 0, 0) : 0; break;
-						default: Help(argv[a]); return 1;
-					}
-					break;
-
-				case 'm':	// maker code
-					REQUIRED(makercode);
-					break;
-
-				case 'g':	// game code
-					REQUIRED(gamecode);
-					OPTIONAL(makercode);
-					OPTIONAL(title);
-					OPTIONAL_INT(romversion);
-					break;
-
-				case 'y':	// overlay table file / directory
-					switch (argv[a][2])
-					{
-						case '7': REQUIRED(arm7ovltablefilename); break;
-						case '9': REQUIRED(arm9ovltablefilename); break;
-						case 0: REQUIRED(overlaydir); break;
-						default: Help(argv[a]); return 1;
-					}
-					break;
-
-				case '?':	// global or specific help
-				{
-					Help(argv[a][2] ? argv[a]+2 : 0);	// 0=global help
-					return 0;	// do not perform any other actions
-				}
-
-				default:
-				{
-					Help(argv[a]);
-					return 1;
+					fprintf(stderr, "Not enough arguments for '%s'\n", arg);
+					return EXIT_FAILURE;
 				}
 			}
 		}
 		else
 		{
-			//Help();
-			if (ndsfilename)
+			// This is a positional argument. There is only one positional
+			// argument supported.
+			if (ndsfilename == NULL)
 			{
-				fprintf(stderr, "NDS filename is already given!\n");
-				return 1;
+				ndsfilename = arg;
+				continue;
 			}
-			ndsfilename = argv[a];
-			break;
+
+			fprintf(stderr, "Unknown argument (use -? for help): %s\n", arg);
+			return EXIT_FAILURE;
+		}
+
+		if (strcmp(arg, "-i") == 0) // Show information
+		{
+			ADDACTION(ACTION_SHOWINFO);
+			if (argc > a && argv[a][0] != '-')
+				ndsfilename = argv[a++];
+		}
+		else if (strcmp(arg, "-fh") == 0) // Fix header CRC
+		{
+			ADDACTION(ACTION_FIXHEADERCRC);
+			if (argc > a && argv[a][0] != '-')
+				ndsfilename = argv[a++];
+		}
+		else if (strcmp(arg, "-fb") == 0) // Fix banner CRC
+		{
+			ADDACTION(ACTION_FIXBANNERCRC);
+			if (argc > a && argv[a][0] != '-')
+				ndsfilename = argv[a++];
+		}
+		else if (strcmp(arg, "-l") == 0) // List files
+		{
+			ADDACTION(ACTION_LISTFILES);
+			if (argc > a && argv[a][0] != '-')
+				ndsfilename = argv[a++];
+		}
+		else if (strcmp(arg, "-x") == 0) // Extract
+		{
+			ADDACTION(ACTION_EXTRACT);
+			if (argc > a && argv[a][0] != '-')
+				ndsfilename = argv[a++];
+		}
+		else if (strcmp(arg, "-w") == 0) // Wildcard filemasks
+		{
+			while (1)
+			{
+				// No more arguments
+				if (argc == a)
+					break;
+
+				// Detect next program option and exit loop
+				if (argv[a][0] == '-')
+					break;
+
+				if (filemask_num == MAX_FILEMASKS)
+				{
+					fprintf(stderr, "Too many file masks\n");
+					return EXIT_FAILURE;
+				}
+
+				filemasks[filemask_num++] = argv[a++];
+			}
+		}
+		else if (strcmp(arg, "-c") == 0) // Create
+		{
+			ADDACTION(ACTION_CREATE);
+			if (argc > a && argv[a][0] != '-')
+				ndsfilename = argv[a++];
+		}
+		else if (strcmp(arg, "-d") == 0) // File root directory
+		{
+			while (1)
+			{
+				// No more arguments
+				if (argc == a)
+					break;
+
+				// Detect next program option and stop
+				if (argv[a][0] == '-')
+					break;
+
+				if (filerootdirs_num == MAX_FILEROOTDIRS)
+				{
+					fprintf(stderr, "Too many root directories");
+					return EXIT_FAILURE;
+				}
+
+				filerootdirs[filerootdirs_num++] = argv[a++];
+			}
+		}
+		else if (strcmp(arg, "-7i") == 0) // ARM7i filename
+		{
+			arm7ifilename = argv[a++];
+		}
+		else if (strcmp(arg, "-7") == 0) // ARM7 filename
+		{
+			arm7filename = argv[a++];
+		}
+		else if (strcmp(arg, "-9i") == 0) // ARM9i filename
+		{
+			arm9ifilename = argv[a++];
+		}
+		else if (strcmp(arg, "-9") == 0) // ARM9 filename
+		{
+			arm9filename = argv[a++];
+		}
+		else if (strcmp(arg, "-t") == 0)
+		{
+			bannertype = BANNER_BINARY;
+			bannerfilename = argv[a++];
+		}
+		else if (strcmp(arg, "-bt") == 0)
+		{
+			bannertype = BANNER_IMAGE;
+
+			unsigned int text_idx = strtoul(argv[a++], 0, 0);
+
+			if (errno == EINVAL)
+			{
+				text_idx = 1;
+			}
+			else if (text_idx >= MAX_BANNER_TITLE_COUNT)
+			{
+				fprintf(stderr, "The argument for '-bt' must be a number between 0 and %d\n",
+						MAX_BANNER_TITLE_COUNT - 1);
+				return EXIT_FAILURE;
+			}
+
+			bannertext[text_idx] = argv[a++];
+		}
+		else if (strcmp(arg, "-bi") == 0)
+		{
+			bannertype = BANNER_IMAGE;
+			bannerfilename = argv[a++];
+		}
+		else if (strcmp(arg, "-ba") == 0)
+		{
+			bannertype = BANNER_IMAGE;
+			banneranimfilename = argv[a++];
+		}
+		else if (strcmp(arg, "-b") == 0)
+		{
+			bannertype = BANNER_IMAGE;
+
+			bannerfilename = argv[a++];
+
+			if (argc > a && argv[a][0] != '-')
+				bannertext[1] = argv[a++];
+		}
+		else if (strcmp(arg, "-o") == 0)
+		{
+			logofilename = argv[a++];
+		}
+		else if (strcmp(arg, "-h") == 0) // Load header or header size
+		{
+			headerfilename_or_size = argv[a++];
+		}
+		else if (strcmp(arg, "-u") == 0) // DSi title ID high word
+		{
+			titleidHigh = strtoul(argv[a++], 0, 16);
+		}
+		else if (strcmp(arg, "-uc") == 0) // DS unit code
+		{
+			// Valid unit codes are 0 (DS-only), 2 (DS and DSi supported) and 3
+			// (DSi-only).
+			unitCode = strtoul(argv[a++], 0, 10);
+			if ((unitCode == 1) || (unitCode > 3))
+			{
+				fprintf(stderr, "Invalid value for '-uc' (must be 0, 2 or 3): %u\n", unitCode);
+				return EXIT_FAILURE;
+			}
+		}
+		else if (strcmp(arg, "-z") == 0) // SCFG access flags
+		{
+			scfgExtMask = strtoul(argv[a++], 0, 16);
+		}
+		else if (strcmp(arg, "-a") == 0) // DSi access control flags
+		{
+			accessControl = strtoul(argv[a++], 0, 16);
+		}
+		else if (strcmp(arg, "-p") == 0) // DSi application flags
+		{
+			appFlags = strtoul(argv[a++], 0, 16) & 0xFF;
+		}
+		else if (strcmp(arg, "-q") == 0) // DSi ARM7 WRAM_A map address
+		{
+			mbkArm7WramMapAddress = strtoul(argv[a++], 0, 16);
+		}
+		else if (strcmp(arg, "-V") == 0) // Version string
+		{
+			PrintVersion();
+			return EXIT_SUCCESS;
+		}
+		else if (strcmp(arg, "-v") == 0) // Verbose
+		{
+			verbose = 1;
+		}
+		else if (strcmp(arg, "-vv") == 0) // More verbose
+		{
+			verbose = 2;
+		}
+		else if (strcmp(arg, "-n") == 0) // Latency
+		{
+			latency_1 = strtoul(argv[a++], 0, 0);
+			latency_2 = strtoul(argv[a++], 0, 0);
+		}
+		else if (strcmp(arg, "-n1") == 0) // Latency
+		{
+			latency1_1 = strtoul(argv[a++], 0, 0);
+			latency1_2 = strtoul(argv[a++], 0, 0);
+		}
+		else if (strcmp(arg, "-r7") == 0) // ARM7 RAM address
+		{
+			arm7RamAddress = strtoul(argv[a++], 0, 0);
+		}
+		else if (strcmp(arg, "-r9") == 0) // ARM9 RAM address
+		{
+			arm9RamAddress = strtoul(argv[a++], 0, 0);
+		}
+		else if (strcmp(arg, "-e7") == 0) // ARM7 entrypoint
+		{
+			arm7Entry = strtoul(argv[a++], 0, 0);
+		}
+		else if (strcmp(arg, "-e9") == 0) // ARM9 entrypoint
+		{
+			arm9Entry = strtoul(argv[a++], 0, 0);
+		}
+		else if (strcmp(arg, "-m") == 0) // Maker code
+		{
+			makercode = argv[a++];
+		}
+		else if (strcmp(arg, "-g") == 0) // Game code
+		{
+			gamecode = argv[a++];
+			if (argc > a && argv[a][0] != '-')
+			{
+				makercode = argv[a++];
+				if (argc > a && argv[a][0] != '-')
+				{
+					title = argv[a++];
+					if (argc > a && argv[a][0] != '-')
+						romversion = strtoul(argv[a++], 0, 0);
+				}
+			}
+		}
+		else if (strcmp(arg, "-y7") == 0) // ARM7 overlay table file
+		{
+			arm7ovltablefilename = argv[a++];
+		}
+		else if (strcmp(arg, "-y9") == 0) // ARM9 overlay table file
+		{
+			arm9ovltablefilename = argv[a++];
+		}
+		else if (strcmp(arg, "-y") == 0) // Overlay table directory
+		{
+			overlaydir = argv[a++];
+		}
+		else if (strcmp(arg, "-?") == 0) // Global help
+		{
+			Help();
+			return 0; // Do not perform any other actions
+		}
+		else
+		{
+			fprintf(stderr, "Internal parser error (argument %d)\n", a);
+			return EXIT_FAILURE;
 		}
 	}
 
@@ -457,22 +532,27 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "Title can be no more than 12 characters!\n");
 		return 1;
 	}
-	if (romversion > 255) {
+	if (romversion > 255)
+	{
 		fprintf(stderr, "romversion can only be 0 - 255!\n");
 		return 1;
 	}
-	if (!bannertext[1]) {
+	if (!bannertext[1])
 		bannertext[1] = "";
-	}
 
 	/*
 	 * perform actions
 	 */
 
+	if ((num_actions > 0) && (ndsfilename == NULL))
+	{
+		fprintf(stderr, "No NDS file provided\n");
+		exit(EXIT_FAILURE);
+	}
+
 	int status = 0;
 	for (int i=0; i<num_actions; i++)
 	{
-//printf("action %d\n", actions[i]);
 		switch (actions[i])
 		{
 			case ACTION_SHOWINFO:
@@ -485,7 +565,11 @@ int main(int argc, char *argv[])
 
 			case ACTION_FIXBANNERCRC:
 				fNDS = fopen(ndsfilename, "rb");
-				if (!fNDS) { fprintf(stderr, "Cannot open file '%s'.\n", ndsfilename); exit(1); }
+				if (!fNDS)
+				{
+					fprintf(stderr, "Cannot open file '%s'.\n", ndsfilename);
+					exit(EXIT_FAILURE);
+				}
 				FullyReadHeader(fNDS, header);
 				bannersize = GetBannerSizeFromHeader(header, ExtractBannerVersion(fNDS, header.banner_offset));
 				fclose(fNDS);
@@ -494,7 +578,11 @@ int main(int argc, char *argv[])
 
 			case ACTION_EXTRACT: {
 				fNDS = fopen(ndsfilename, "rb");
-				if (!fNDS) { fprintf(stderr, "Cannot open file '%s'.\n", ndsfilename); exit(1); }
+				if (!fNDS)
+				{
+					fprintf(stderr, "Cannot open file '%s'.\n", ndsfilename);
+					exit(EXIT_FAILURE);
+				}
 				unsigned int headersize = FullyReadHeader(fNDS, header);
 				bannersize = GetBannerSizeFromHeader(header, ExtractBannerVersion(fNDS, header.banner_offset));
 				fclose(fNDS);
@@ -505,13 +593,18 @@ int main(int argc, char *argv[])
 					if (arm9ifilename) Extract(arm9ifilename, true, 0x1C0, true, 0x1CC, true);
 					if (arm7ifilename) Extract(arm7ifilename, true, 0x1D0, true, 0x1DC);
 				}
-				if (bannerfilename) Extract(bannerfilename, true, 0x68, false, bannersize);
+				if (bannerfilename) {
+					if (bannertype == BANNER_BINARY)
+						Extract(bannerfilename, true, 0x68, false, bannersize);
+					else if (bannertype == BANNER_IMAGE)
+						IconToBMP();
+				}
 				if (headerfilename_or_size) Extract(headerfilename_or_size, false, 0x0, false, headersize);
 				if (logofilename) Extract(logofilename, false, 0xC0, false, 156);	// *** bin only
 				if (arm9ovltablefilename) Extract(arm9ovltablefilename, true, 0x50, true, 0x54);
 				if (arm7ovltablefilename) Extract(arm7ovltablefilename, true, 0x58, true, 0x5C);
 				if (overlaydir) ExtractOverlayFiles();
-				if (filerootdir) ExtractFiles(ndsfilename);
+				if (filerootdirs_num > 0) ExtractFiles(ndsfilename, filerootdirs[0]);
 				break;
 			}
 
@@ -520,8 +613,7 @@ int main(int argc, char *argv[])
 				break;
 
 			case ACTION_LISTFILES:
-				filerootdir = 0;
-				/*status =*/ ExtractFiles(ndsfilename);
+				ExtractFiles(ndsfilename, NULL); // List mode
 				break;
 		}
 	}

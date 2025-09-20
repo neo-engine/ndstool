@@ -1,3 +1,5 @@
+// SPDX-FileNotice: Modified from the original version by the BlocksDS project, starting from 2023.
+
 #pragma once
 
 #include <stdio.h>
@@ -18,6 +20,8 @@
 #define ROMTYPE_MASKROM		4	// unknown layout
 
 #define MAX_FILEMASKS		16
+
+#define MAX_FILEROOTDIRS	32
 
 enum { BANNER_NONE, BANNER_BINARY, BANNER_IMAGE };
 
@@ -41,13 +45,13 @@ extern int filemask_num;
 extern char *ndsfilename;
 extern char *arm7filename;
 extern char *arm9filename;
-extern char *filerootdir;
-extern char *fatimagepath;
+extern int filerootdirs_num;
+extern char *filerootdirs[MAX_FILEROOTDIRS];
 extern char *overlaydir;
 extern char *arm7ovltablefilename;
 extern char *arm9ovltablefilename;
-extern char *bannerfilename;
-extern char *banneranimfilename;
+extern const char *bannerfilename;
+extern const char *banneranimfilename;
 extern const char *bannertext[MAX_BANNER_TITLE_COUNT];
 extern int bannertype;
 extern unsigned int bannersize;
@@ -59,6 +63,7 @@ extern unsigned int arm9RamAddress;
 extern unsigned int arm7RamAddress;
 extern unsigned int arm9Entry;
 extern unsigned int arm7Entry;
+extern int unitCode;
 extern unsigned int titleidHigh;
 extern unsigned int scfgExtMask;
 extern unsigned int accessControl;
@@ -67,8 +72,8 @@ extern unsigned int mbkArm7WramMapAddress;
 extern char *title;
 extern char *makercode;
 extern char *gamecode;
-extern int latency1;
-extern int latency2;
+extern int latency_1;
+extern int latency_2;
+extern int latency1_1;
+extern int latency1_2;
 extern unsigned int romversion;
-
-extern const char CompileDate[];

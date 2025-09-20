@@ -1,3 +1,5 @@
+// SPDX-FileNotice: Modified from the original version by the BlocksDS project, starting from 2023.
+
 #pragma once
 
 #define MAX_BANNER_TITLE_COUNT 16
@@ -31,5 +33,6 @@ int GetBannerLanguageCount(unsigned short version);
 unsigned int CalcBannerSize(unsigned short version);
 unsigned short GetBannerMinVersionForCRCSlot(unsigned short slot);
 unsigned short CalcBannerCRC(Banner &banner, unsigned short slot, unsigned int bannersize);
+void IconToBMP();
 void IconFromBMP();
 void IconFromGRF();

@@ -10,8 +10,8 @@
 #define STBI_ONLY_BMP
 #define STBI_ONLY_GIF
 #pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-parameter"
-#pragma GCC diagnostic ignored "-Wtype-limits"
+#pragma GCC diagnostic ignored "-Wunused-function"
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #include "stb_image.h"
 #pragma GCC diagnostic pop
 
@@ -50,9 +50,12 @@ void RasterImage::set_data(int z, int x, int y, unsigned int v) {
 	}
 }
 
-bool RasterImage::load(char *filename) {
+bool RasterImage::loadFile(const char *filename) {
 	stbi__context ctx;
-	stbi__result_info res;
+	
+	data = NULL;
+	delays = NULL;
+
 	FILE *f = stbi__fopen(filename, "rb");
 	if (f == NULL) {
 		fprintf(stderr, "Could not open image file \"%s\".\n", filename);
@@ -60,17 +63,32 @@ bool RasterImage::load(char *filename) {
 	}
 	stbi__start_file(&ctx, f);
 
+	return loadStb(&ctx, filename);
+}
+
+bool RasterImage::loadBuffer(const void *_data, size_t length, const char *name) {
+	stbi__context ctx;
+
 	data = NULL;
 	delays = NULL;
 
-	if (stbi__gif_test(&ctx)) {
+	stbi__start_mem(&ctx, (const stbi_uc*) _data, length);
+
+	return loadStb(&ctx, name);
+}
+
+bool RasterImage::loadStb(void *_ctx, const char *filename) {
+	stbi__context *ctx = (stbi__context*) _ctx;
+	stbi__result_info res;
+	
+	if (stbi__gif_test(ctx)) {
 		// Load GIFs using the dedicated function - this allows loading animation data.
 		res.bits_per_channel = 8;
-		data = (unsigned char*) stbi__load_gif_main(&ctx, &delays, &width, &height, &frames, &components, 4);
+		data = (unsigned char*) stbi__load_gif_main(ctx, &delays, &width, &height, &frames, &components, 4);
 	} else {
 		frames = 1;
 		delays = NULL;
-		data = (unsigned char*) stbi__load_main(&ctx, &width, &height, &components, 4, &res, 8);
+		data = (unsigned char*) stbi__load_main(ctx, &width, &height, &components, 4, &res, 8);
 	}
 	// The "reqcomp" stbi parameter seems to convert, but still set the old value...
 	components = 4;
@@ -102,6 +120,48 @@ bool RasterImage::load(char *filename) {
 		return false;
 	}
 
+	return true;
+}
+
+typedef struct __attribute__((packed)) {
+	uint16_t magic = 0x4D42;
+	uint32_t size;
+	uint16_t reserved[2];
+	uint32_t offset;
+	uint32_t core_header_size = 12;
+	uint16_t width;
+	uint16_t height;
+	uint16_t planes = 1;
+	uint16_t bpp;
+} bmp_header_t;
+
+bool RasterImage::saveFile(const char *filename) {
+	// TODO: Support saving images which are not unpaletted BMPs.
+	// (Probably during the migration to libplum.)
+
+	if (has_palette) return false;
+	if (frames > 1) return false;
+	if (components != 3) return false;
+
+	FILE *f = fopen(filename, "wb");
+	if (!f) return false;
+
+	bmp_header_t header;
+	header.size = sizeof(bmp_header_t) + (width * height * 3);
+	header.offset = sizeof(bmp_header_t);
+	header.width = width;
+	header.height = height;
+	header.bpp = get_component_size() * 8;
+	if (fwrite(&header, sizeof(header), 1, f) <= 0) return false;
+	for (int y = height - 1; y >= 0; y--) {
+		for (int x = 0; x < width; x++) {
+			if (fputc((get_data(0, x, y) >> 16) & 0xFF, f) < 0) return false;
+			if (fputc((get_data(0, x, y) >> 8) & 0xFF, f) < 0) return false;
+			if (fputc(get_data(0, x, y) & 0xFF, f) < 0) return false;
+		}
+	}
+
+	fclose(f);
 	return true;
 }
 
@@ -259,26 +319,31 @@ bool RasterImage::make_zero_transparent(void) {
 	return true;
 }
 
-RasterImage RasterImage::clone(bool flip_h, bool flip_v) const {
-	RasterImage result;
-	memcpy(&result, this, sizeof(RasterImage));
+RasterImage *RasterImage::clone(bool flip_h, bool flip_v) const {
+	RasterImage *result = new RasterImage;
+	memcpy(result, this, sizeof(RasterImage));
 
 	if (delays != NULL) {
-		result.delays = (int*) malloc(frames * sizeof(int));
-		memcpy(result.delays, delays, frames * sizeof(int));
+		result->delays = (int*) malloc(frames * sizeof(int));
+		memcpy(result->delays, delays, frames * sizeof(int));
 	}
 
-	result.data = (unsigned char*) malloc(frames * width * height * get_component_size());
-	for (int z = 0; z < frames; z++) {
-		for (int y = 0; y < height; y++) {
-			for (int x = 0; x < width; x++) {
-				int in_x = flip_h ? width - 1 - x : x;
-				int in_y = flip_v ? height - 1 - y : y;
-				result.set_data(z, x, y, get_data(z, in_x, in_y));
+	size_t data_size = frames * width * height * get_component_size();
+	result->data = (unsigned char*) malloc(data_size);
+	if (!flip_h && !flip_v) {
+		memcpy(result->data, this->data, data_size);
+	} else {
+		for (int z = 0; z < frames; z++) {
+			for (int y = 0; y < height; y++) {
+				for (int x = 0; x < width; x++) {
+					int in_x = flip_h ? width - 1 - x : x;
+					int in_y = flip_v ? height - 1 - y : y;
+					result->set_data(z, x, y, get_data(z, in_x, in_y));
+				}
 			}
 		}
 	}
-	result.is_subimage = false;
+	result->is_subimage = false;
 
 	return result;
 }

@@ -1,3 +1,5 @@
+// SPDX-FileNotice: Modified from the original version by the BlocksDS project, starting from 2023.
+
 #include "ndstool.h"
 #include "banner.h"
 #include "sha1.h"
@@ -117,7 +119,8 @@ void FixHeaderCRC(char *ndsfilename)
 {
 	fNDS = fopen(ndsfilename, "r+b");
 	if (!fNDS) { fprintf(stderr, "Cannot open file '%s'.\n", ndsfilename); exit(1); }
-	fread(&header, 512, 1, fNDS);
+	unsigned int header_size = FullyReadHeader(fNDS, header);
+
 	header.logo_crc = CalcLogoCRC(header);
 	header.header_crc = CalcHeaderCRC(header);
 
@@ -131,7 +134,7 @@ void FixHeaderCRC(char *ndsfilename)
 	}
 
 	fseek(fNDS, 0, SEEK_SET);
-	fwrite(&header, header.rom_header_size, 1, fNDS);
+	fwrite(&header, header_size, 1, fNDS);
 	fclose(fNDS);
 }
 
@@ -163,7 +166,7 @@ void ShowHeaderInfo(Header &header, int romType, unsigned int length = 0x200)
 		}
 	}
 	printf("\n");
-
+	
 	printf("0x10\t%-25s\t", "Maker code"); for (unsigned int i=0; i<sizeof(header.makercode); i++)
 		if (header.makercode[i]) putchar(header.makercode[i]);
 	for (int j=0; j<NumMakers; j++)
@@ -199,8 +202,14 @@ void ShowHeaderInfo(Header &header, int romType, unsigned int length = 0x200)
 	printf("0x54\t%-25s\t0x%X\n", "ARM9 overlay size", (int)header.arm9_overlay_size);
 	printf("0x58\t%-25s\t0x%X\n", "ARM7 overlay offset", (int)header.arm7_overlay_offset);
 	printf("0x5C\t%-25s\t0x%X\n", "ARM7 overlay size", (int)header.arm7_overlay_size);
-	printf("0x60\t%-25s\t0x%08X\n", "ROM control info 1", (int)header.rom_control_info1);
-	printf("0x64\t%-25s\t0x%08X\n", "ROM control info 2", (int)header.rom_control_info2);
+	printf("0x60\t%-25s\t0x%08X (latency %d, %d)\n", "ROM control info 1",
+		(int)header.rom_control_info1,
+		(int)(header.rom_control_info1 & 0x1FFF),
+		(int)((header.rom_control_info1 >> 16) & 0x3F));
+	printf("0x64\t%-25s\t0x%08X (latency %d, %d)\n", "ROM control info 2",
+		(int)header.rom_control_info2,
+		(int)(header.rom_control_info2 & 0x1FFF),
+		(int)((header.rom_control_info2 >> 16) & 0x3F));
 	printf("0x68\t%-25s\t0x%X\n", "Icon/title offset", (int)header.banner_offset);
 	unsigned short secure_area_crc = CalcSecureAreaCRC();
 	const char *s1, *s2 = "";
@@ -245,7 +254,7 @@ void ShowHeaderInfo(Header &header, int romType, unsigned int length = 0x200)
 	}
 
 	int	offset=0x1c0;
-
+	
 	if (isTwl) {
 		printf("0x1C0\t%-25s\t0x%X\n", "DSi9 ROM offset", (int)header.dsi9_rom_offset);
 		printf("0x1C8\t%-25s\t0x%X\n", "DSi9 RAM address", (int)header.dsi9_ram_address);
@@ -445,7 +454,7 @@ void ShowVerboseInfo(FILE *fNDS, Header &header, int romType)
 
 		unsigned char sha_parts[3*SHA1_DIGEST_SIZE + 4];
 		fread(sha_parts + 3*SHA1_DIGEST_SIZE, 4, 1, fNDS);		// some number
-
+		
 		//printf("%08X\n", *(unsigned int *)(sha_parts + 3*SHA1_DIGEST_SIZE));
 
 		unsigned char header_sha1[SHA1_DIGEST_SIZE];
@@ -491,7 +500,7 @@ void ShowVerboseInfo(FILE *fNDS, Header &header, int romType)
 			//printf("big_sha1: "); big_sha1.print();
 			big_sha1.Get(sha1_from_sig, sizeof(sha1_from_sig));
 		}
-
+		
 		bool ok = (memcmp(sha_final, sha1_from_sig, SHA1_DIGEST_SIZE) == 0);
 		printf("DS Download Play(TM) / Wireless MultiBoot signature: %s\n", ok ? "OK" : "INVALID");
 		if (!ok)

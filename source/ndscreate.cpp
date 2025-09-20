@@ -1,3 +1,5 @@
+// SPDX-FileNotice: Modified from the original version by the BlocksDS project, starting from 2023.
+
 #include <time.h>
 #include <unistd.h>
 #include "ndstool.h"
@@ -101,7 +103,7 @@ bool HasElfHeader(char *filename)
 /*
  * CopyFromBin
  */
-int CopyFromBin(char *binFilename, unsigned int *size = 0, unsigned int *size_without_footer = 0)
+int CopyFromBin(const char *binFilename, unsigned int *size = 0, unsigned int *size_without_footer = 0)
 {
 	FILE *fi = fopen(binFilename, "rb");
 	if (!fi) { fprintf(stderr, "Cannot open file '%s'.\n", binFilename); exit(1); }
@@ -132,18 +134,25 @@ int CopyFromBin(char *binFilename, unsigned int *size = 0, unsigned int *size_wi
 	return 0;
 }
 
-/*
- * AddFile
- */
-void AddFile(const char *rootdir, const char *prefix, const char *entry_name, unsigned int file_id)
+// If fs_path is provided, it will be used as the full path of the file in the
+// filesystem of the host. If it isn't, it will be formed from the other
+// arguments as "rootdir + prefix + entry_name".
+static void AddFile(const char *fs_path, const char *rootdir, const char *prefix,
+					const char *entry_name, unsigned int file_id)
 {
-	// make filename
+	// Make filename
 	char strbuf[MAXPATHLEN];
-	strcpy(strbuf, rootdir);
-	strcat(strbuf, prefix);
-	strcat(strbuf, entry_name);
 
-	//unsigned int file_end = ftell(fNDS);
+	if (fs_path) // If it has been provided directly
+	{
+		strcpy(strbuf, fs_path);
+	}
+	else
+	{
+		strcpy(strbuf, rootdir);
+		strcat(strbuf, prefix);
+		strcat(strbuf, entry_name);
+	}
 
 	file_top = (file_top + file_align) &~ file_align;
 	fseek(fNDS, file_top, SEEK_SET);
@@ -258,7 +267,7 @@ void AddDirectory(TreeNode *node, const char *prefix, unsigned int this_dir_id, 
 
 		if (!t->directory)
 		{
-			AddFile(filerootdir, prefix, t->name, local_file_id++);
+			AddFile(t->fs_path, NULL, prefix, t->name, local_file_id++);
 		}
 	}
 
@@ -354,8 +363,8 @@ void Create()
 		{
 			memcpy(header.title, "HOMEBREW", 8);
 		}
-		header.rom_control_info1 = 1<<22 | latency2<<16 | 1<<14 | 1<<13 | latency1;	// ROM control info 1
-		header.rom_control_info2 = 1<<29 | latency2<<16 | latency1;	// ROM control info 2
+		header.rom_control_info1 = 1<<22 | latency_2<<16 | 1<<14 | 1<<13 | latency_1;	// ROM control info 1
+		header.rom_control_info2 = latency1_2<<16 | latency1_1;	// ROM control info 2
 		header.rom_control_info3 = 0x051E;	// ROM control info 3
 	}
 	if (headersize) header.rom_header_size = headersize;
@@ -367,7 +376,7 @@ void Create()
 		if (IsRasterImageExtensionFilename(logofilename))
 		{
 			RasterImage raster;
-			if (!raster.load(logofilename)) exit(1);
+			if (!raster.loadFile(logofilename)) exit(1);
 			if (!LogoConvert(raster, header.logo)) exit(1);
 		}
 		else
@@ -514,23 +523,27 @@ void Create()
 	}
 
 	// filesystem
-	//if (filerootdir || overlaydir)
+	//if ((filerootdirs_num > 0) || overlaydir)
 	{
 		// read directory structure
 		free_file_id = overlay_files;
 		free_dir_id++;
 		directory_count++;
 		TreeNode *filetree;
-		if (filerootdir)
-			filetree = ReadDirectory(new TreeNode(), filerootdir);
-		else
+		if (filerootdirs_num == 0)
+		{
 			filetree = new TreeNode();		// dummy root node 0xF000
+		}
+		else
+		{
+			filetree = new TreeNode();
+			for (int i = 0; i < filerootdirs_num; i++)
+				ReadDirectory(filetree, filerootdirs[i]);
+		}
 
 		// calculate offsets required for FNT and FAT
 		_entry_start = 8*directory_count;		// names come after directory structs
 		header.fnt_offset = (ftell(fNDS) + fnt_align) &~ fnt_align;
-
-
 		header.fnt_size =
 			_entry_start +		// directory structs
 			total_name_size +	// total number of name characters for dirs and files
@@ -541,16 +554,35 @@ void Create()
 		header.fat_offset = (header.fnt_offset + header.fnt_size + fat_align) &~ fat_align;
 		header.fat_size = file_count * 8;		// each entry contains top & bottom offset
 
-        fprintf( stderr, "fnt_offset 0x%lx; fat_offset 0x%lx\n", header.fnt_offset,
-                header.fat_offset );
+		size_t fat_end_offset = header.fat_offset + header.fat_size;
+
+		// The NitroFS library needs a magic value at a known location to verify that it can read
+		// data correctly using official DS card commands (this isn't required when reading from
+		// Slot-2 or from a file in FAT).
+		//
+		// A safe place for this value is right after the FAT table because any homebrew that uses
+		// NitroFS needs at least a valid FAT table.
+		if (file_count > 0)
+		{
+			fseek(fNDS, fat_end_offset, SEEK_SET);
+
+			const size_t nitrofs_magic_size = 8;
+			const uint8_t magic[nitrofs_magic_size] = {
+				'N', 'i', 't', 'r', 'o', 'F', 'S', '!'
+			};
+
+			fwrite(&magic, 1, nitrofs_magic_size, fNDS);
+
+			fat_end_offset += nitrofs_magic_size;
+		}
 
 		// banner after FNT/FAT
 		{
-			header.banner_offset = (header.fat_offset + header.fat_size + banner_align) &~ banner_align;
+			header.banner_offset = (fat_end_offset + banner_align) &~ banner_align;
 			fseek(fNDS, header.banner_offset, SEEK_SET);
 			if (bannertype == BANNER_IMAGE)
 			{
-				char * Ext = bannerfilename == NULL ? NULL : strrchr(bannerfilename, '.');
+				const char * Ext = bannerfilename == NULL ? NULL : strrchr(bannerfilename, '.');
 				if (Ext && strcasecmp(Ext, ".grf") == 0)
 				{
 					IconFromGRF();
@@ -582,13 +614,16 @@ void Create()
 			}
 			else
 			{
-				file_top = header.fat_offset + header.fat_size;
 				header.banner_offset = 0;
 				header.banner_size = 0;
 			}
 
-			file_top = header.banner_offset + bannersize;
 			header.banner_size = bannersize;
+
+			if (header.banner_offset)
+				file_top = header.banner_offset + header.banner_size;
+			else
+				file_top = fat_end_offset;
 		}
 
 		file_end = file_top;	// no file data as yet
@@ -596,8 +631,8 @@ void Create()
 		// add (hidden) overlay files
 		for (unsigned int i=0; i<overlay_files; i++)
 		{
-			char s[32]; snprintf(s, 31, OVERLAY_FMT, i/*free_file_id*/);
-			AddFile(overlaydir, "/", s, i/*free_file_id*/);
+			char s[32]; sprintf(s, OVERLAY_FMT, i/*free_file_id*/);
+			AddFile(NULL, overlaydir, "/", s, i/*free_file_id*/);
 			//free_file_id++;		// incremented up to overlay_files
 		}
 
@@ -613,17 +648,6 @@ void Create()
 		}
 	}
 
-	if (fatimagepath) {
-		// Align to a FAT block size so that all reads are always aligned.
-		uint32_t block_align = 512 - 1;
-		header.fat_offset = (ftell(fNDS) + block_align) &~ block_align;
-
-		fseek(fNDS, header.fat_offset, SEEK_SET);
-		unsigned int fatimagesize;
-		CopyFromBin(fatimagepath, &fatimagesize);
-		header.fat_size = fatimagesize;
-	}
-
 	// --------------------------
 
 	// align file size
@@ -636,7 +660,6 @@ void Create()
 	}
 
 	// DSi sections
-    /*
 	if (header.rom_header_size > 0x200 && is_both_elf)
 	{
 		int sections = 2;
@@ -687,16 +710,19 @@ void Create()
 
 		if (sections)
 		{
-			// This is a DSi application!
-			header.unitcode = 2;
-
-			// Flag as DSi exclusive if higher TID is not the default
-			if (titleidHigh != 0x00030000)
-				header.unitcode |= 1;
+			// This is a DSi-aware application. If the user has specified a unit
+			// code use it.
+			if (unitCode == -1)
+				header.unitcode = 2;
+			else
+				header.unitcode = unitCode;
 
 			// Flag as DSi exclusive if ARM9 is too big
 			if (header.arm9_size > 0x3BFE00)
+			{
 				header.unitcode |= 1;
+				fprintf(stderr, "ARM9 binary is too big for NDS. Marking ROM as DSi-only\n");
+			}
 
 			// Move ARM7 out of the way if it overlaps with ARM9
 			unsigned int arm9_end = header.arm9_ram_address+header.arm9_size;
@@ -719,10 +745,6 @@ void Create()
 			ftruncate(fileno(fNDS), newfilesize);
 		}
 	}
-*/
-
-	header.rom_control_info1 = 0x00586000;
-	header.rom_control_info2 = 0x001808F8;
 
 	// Set flags in DSi extended header
 	if (header.unitcode & 2)
@@ -809,7 +831,7 @@ void Create()
 	}
 
 	fseek(fNDS, 0, SEEK_SET);
-	fwrite(&header, (header.unitcode&2) ? 0x1000 : 0x200, 1, fNDS);
+	fwrite(&header, (header.unitcode & 2) ? 0x1000 : 0x200, 1, fNDS);
 
 	fclose(fNDS);
 }

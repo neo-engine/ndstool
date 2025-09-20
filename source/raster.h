@@ -25,15 +25,26 @@ struct RasterRgbQuad
 
 	RasterRgbQuad() {}
 
-	RasterRgbQuad(unsigned int pxl) {
-		a = pxl >> 24;
-		b = pxl >> 16;
-		g = pxl >> 8;
-		r = pxl >> 0;
+	RasterRgbQuad(unsigned int pxl, bool rgb15) {
+		if (rgb15) {
+			a = ((pxl >> 15) & 0x01) * 255;
+			b = ((pxl >> 10) & 0x1F) * 255 / 31;
+			g = ((pxl >> 5) & 0x1F) * 255 / 31;
+			r = (pxl & 0x1F) * 255 / 31;
+		} else {
+			a = pxl >> 24;
+			b = pxl >> 16;
+			g = pxl >> 8;
+			r = pxl >> 0;
+		}
 	}
 
 	inline unsigned short rgb15() {
 		return RGB15(r >> 3, g >> 3, b >> 3);
+	}
+
+	inline unsigned int rgb24() {
+		return r | (g << 8) | (b << 16) | (r << 24);
 	}
 };
 
@@ -72,6 +83,17 @@ struct RasterImage
 		delays = NULL;
 		has_palette = false;
 		is_subimage = false;
+	}
+
+	RasterImage(int _width, int _height, int _frames = 1, int _components = 4) {
+		width = _width;
+		height = _height;
+		frames = _frames;
+		components = _components;
+		has_palette = false;
+		is_subimage = false;
+		data = (unsigned char*) malloc(frames * width * height * get_component_size());
+		delays = NULL;
 	}
 
 	~RasterImage();
@@ -131,14 +153,20 @@ struct RasterImage
 	}
 
 	// Returns a cloned RasterImage with the specific transformations applied.
-	RasterImage clone(bool flip_h = false, bool flip_v = false) const;
+	RasterImage *clone(bool flip_h = false, bool flip_v = false) const;
 
 	// Return the maximum palette count across all frames.
 	int max_palette_count(void) const;
 
 	// Load an image file. BMP, GIF and PNG files are supported.
 	// For animation, only GIF files are supported.
-	bool load(char *filename);
+	bool loadFile(const char *filename);
+
+	// Load an image file from memory.
+	bool loadBuffer(const void *data, size_t length, const char *name);
+
+	// Save an image file.
+	bool saveFile(const char *filename);
 
 	// Quantize the color-values to match the RGB15 format (1-bit alpha, 5-bit colors).
 	bool quantize_rgb15(void);
@@ -148,6 +176,9 @@ struct RasterImage
 
 	// Convert a paletted image such that index 0, and only index 0, is transparent.
 	bool make_zero_transparent(void);
+
+protected:
+	bool loadStb(void *ctx, const char *filename);
 };
 
 // The == operator checks for pixel-level equivalency, not data-level equivalency.

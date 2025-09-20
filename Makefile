@@ -8,10 +8,28 @@
 SOURCEDIRS	:= source
 INCLUDEDIRS	:= source
 
+
+# Version string handling
+# -----------------------
+
+# Try to generate a version string if it isn't already provided
+ifeq ($(VERSION_STRING),)
+    # Try an exact match with a tag (e.g. v1.12.1)
+    VERSION_STRING	:= $(shell git describe --tags --exact-match --dirty 2>/dev/null)
+    ifeq ($(VERSION_STRING),)
+        # Try a non-exact match (e.g. v1.12.1-3-g67a811a)
+        VERSION_STRING	:= $(shell git describe --tags --dirty 2>/dev/null)
+        ifeq ($(VERSION_STRING),)
+            # If no version is provided by the user or git, fall back to this
+            VERSION_STRING	:= DEV
+        endif
+    endif
+endif
+
 # Defines passed to all files
 # ---------------------------
 
-DEFINES		:= -DPACKAGE_VERSION=\"2.2.1\"
+DEFINES		:= -DVERSION_STRING=\"$(VERSION_STRING)\"
 
 # Libraries
 # ---------
@@ -38,8 +56,8 @@ ELF		:= $(NAME)
 STRIP		:= -s
 BINMODE		:= 755
 
-CC		:= gcc
-CXX		:= g++
+HOSTCC		?= gcc
+HOSTCXX		?= g++
 CP		:= cp
 MKDIR		:= mkdir
 RM		:= rm -rf
@@ -69,9 +87,9 @@ WARNFLAGS_C	:= -Wall -Wextra -Wpedantic -Wstrict-prototypes
 WARNFLAGS_CXX	:= -Wall -Wextra -Wno-unused-result
 
 ifeq ($(SOURCES_CPP),)
-    LD	:= $(CC)
+    HOSTLD	:= $(HOSTCC)
 else
-    LD	:= $(CXX)
+    HOSTLD	:= $(HOSTCXX)
 endif
 
 INCLUDEFLAGS	:= $(foreach path,$(INCLUDEDIRS),-I$(path)) \
@@ -101,8 +119,8 @@ DEPS		:= $(OBJS:.o=.d)
 all: $(ELF)
 
 $(ELF): $(OBJS)
-	@echo "  LD      $@"
-	$(V)$(LD) -o $@ $(OBJS) $(LDFLAGS)
+	@echo "  HOSTLD  $@"
+	$(V)$(HOSTLD) -o $@ $(OBJS) $(LDFLAGS)
 
 clean:
 	@echo "  CLEAN  "
@@ -117,20 +135,20 @@ install: all
 	$(V)$(RM) $(INSTALLDIR_ABS)
 	$(V)$(INSTALL) -d $(INSTALLDIR_ABS)
 	$(V)$(INSTALL) $(STRIP) -m $(BINMODE) $(NAME) $(INSTALLDIR_ABS)
-	$(V)$(CP) COPYING $(INSTALLDIR_ABS)
+	$(V)$(CP) ./COPYING* $(INSTALLDIR_ABS)
 
 # Rules
 # -----
 
 $(BUILDDIR)/%.c.o : %.c
-	@echo "  CC      $<"
+	@echo "  HOSTCC  $<"
 	@$(MKDIR) -p $(@D)
-	$(V)$(CC) $(CFLAGS) -MMD -MP -c -o $@ $<
+	$(V)$(HOSTCC) $(CFLAGS) -MMD -MP -c -o $@ $<
 
 $(BUILDDIR)/%.cpp.o : %.cpp
-	@echo "  CXX     $<"
+	@echo "  HOSTCXX $<"
 	@$(MKDIR) -p $(@D)
-	$(V)$(CXX) $(CXXFLAGS) -MMD -MP -c -o $@ $<
+	$(V)$(HOSTCXX) $(CXXFLAGS) -MMD -MP -c -o $@ $<
 
 # Include dependency files if they exist
 # --------------------------------------
